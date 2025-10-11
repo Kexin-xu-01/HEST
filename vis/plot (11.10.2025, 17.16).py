@@ -51,106 +51,16 @@ DEFAULT_RUNS_ROOT = "/project/simmons_hts/kxu/hest/eval/ST_pred_results"
 DEFAULT_SPLITS_ROOT = "/project/simmons_hts/kxu/hest/eval/data"
 DEFAULT_CURATED_XLSX = "/project/simmons_hts/kxu/hest/curated_gene_list.xlsx"
 DEFAULT_EXTRA_METADATA = "/project/simmons_hts/kxu/hest/hest_directory.csv"
-DEFAULT_BROAD_METADATA = "/project/simmons_hts/kxu/hest/broad_directory.csv"
-DEFAULT_SUMMARY_PLOT_DIR = "/project/simmons_hts/kxu/hest/eval/summary_plots"
+
 
 # -----------------------
 # Core IO
 # -----------------------
-import pandas as pd
-import numpy as np
-
-def add_num_training_patches_mean(
-    df_summary: pd.DataFrame,
-    xenium_csv: str = "/project/simmons_hts/kxu/hest/hest_directory.csv",
-    broad_csv: str = "/project/simmons_hts/kxu/hest/broad_directory.csv",
-) -> pd.DataFrame:
-    """
-    Add a column 'num_training_patches_mean' to df_summary based on dataset rules,
-    using CASE-INSENSITIVE column lookup for all 'num_patches*' columns and 'SampleID'.
-    """
-    out = df_summary.copy()
-
-    # Load metadata (once)
-    try:
-        xen = pd.read_csv(xenium_csv)
-    except Exception:
-        xen = pd.DataFrame()
-
-    try:
-        brd = pd.read_csv(broad_csv)
-    except Exception:
-        brd = pd.DataFrame()
-
-    # ---- case-insensitive column helpers ----
-    def _find_col_ci(df: pd.DataFrame, target: str):
-        if df.empty:
-            return None
-        lowmap = {c.lower(): c for c in df.columns}
-        return lowmap.get(target.lower())
-
-    def _find_any_col_ci(df: pd.DataFrame, targets: list[str]):
-        for t in targets:
-            col = _find_col_ci(df, t)
-            if col is not None:
-                return col
-        return None
-
-    def _safe_mean_ci(df: pd.DataFrame, col_candidates: list[str]) -> float:
-        col = _find_any_col_ci(df, col_candidates)
-        if col is None:
-            return np.nan
-        return pd.to_numeric(df[col], errors="coerce").dropna().mean()
-
-    # --- resolve commonly used columns case-insensitively ---
-    col_sample_id_xen = _find_col_ci(xen, "sample_id")
-
-    # xenium means
-    xen_mean_num_patches = _safe_mean_ci(xen, ["num_patches_100um_unfiltered"])
-    xen_mean_num_patches_segger = _safe_mean_ci(xen, ["num_patches_100um"])
-
-    # pilot subset (two sample IDs)
-    pilot_ids = {"XeniumPR1S1ROI2", "XeniumPR1S1ROI3"}
-    if col_sample_id_xen is not None:
-        xen_pilot = xen[xen[col_sample_id_xen].astype(str).isin(pilot_ids)]
-        xen_pilot_mean = _safe_mean_ci(xen_pilot, ["num_patches_100um_unfiltered"])
-    else:
-        xen_pilot_mean = np.nan
-
-    # broad means 
-    brd_mean_num_patches = _safe_mean_ci(brd, ["num_patches_100um"])
-    brd_mean_cell_centered = _safe_mean_ci(brd, ["num_patches_cell_centered"])
-
-    # per-row mapping
-    def _compute(row):
-        ds = str(row.get("dataset", "")).strip()
-        if ds == "pilot":
-            return xen_pilot_mean
-        elif ds == "XeniumPR1":
-            return xen_mean_num_patches * 14
-        elif ds == "XeniumPR1_segger":
-            return xen_mean_num_patches_segger * 14
-        elif ds == "broad":
-            return brd_mean_num_patches * 6
-        elif ds == "XeniumPR1_broad":
-            a = brd_mean_num_patches * 7   # total number of broad patches
-            b = xen_mean_num_patches_segger * 15  # total number of xeniumpr1 patches
-            if pd.isna(a) and pd.isna(b):
-                return np.nan
-            return (0 if pd.isna(a) else a + 0) / 2 if pd.isna(b) else ((a + b) / 2)
-        elif ds == "broad_cell_centered":
-            return brd_mean_cell_centered * 6
-        else:
-            return np.nan
-
-    out["num_training_patches_mean"] = out.apply(_compute, axis=1)
-    return out
-
 
 def summarize_runs(root_dir):
     """
     List runs in ST_pred_results and summarize config.json details along with
-    highest Pearson mean/std from dataset_results.json and gene count.
+    highest Pearson mean and std from dataset_results.json.
 
     Args:
         root_dir (str): Root directory containing the run folders.
@@ -169,56 +79,16 @@ def summarize_runs(root_dir):
         gene_list = ""
         config_found = False
         best_model = None
-        num_genes = None
-        dataset_name = None
 
-        # --- find config.json and parse basics ---
-        config_dir = None
+        # Search for config.json
         for dirpath, _, filenames in os.walk(run_path):
             if "config.json" in filenames:
                 config_path = os.path.join(dirpath, "config.json")
-                config_dir = dirpath
-                with open(config_path, "r") as f:
+                with open(config_path, 'r') as f:
                     config_data = json.load(f)
-                gene_list = config_data.get("gene_list", "") or ""
-                # datasets can be a list; take the first if present
-                ds = config_data.get("datasets")
-                if isinstance(ds, list) and ds:
-                    dataset_name = ds[0]
-                elif isinstance(ds, str):
-                    dataset_name = ds
+                    gene_list = config_data.get("gene_list", "")
                 config_found = True
                 break
-
-                   # --- try to locate and count genes in <gene_list>.json ---
-        def _try_count_genes(path):
-            try:
-                with open(path, "r") as gf:
-                    payload = json.load(gf)
-                if isinstance(payload, dict) and isinstance(payload.get("genes"), list):
-                    return len(payload["genes"])
-                if isinstance(payload, list):
-                    return len(payload)
-            except Exception:
-                pass
-            return None
-
-        if gene_list:
-            candidates = []
-
-            # 3) under eval/data/<dataset_name>/<gene_list>
-            if dataset_name:
-                data_root = DEFAULT_SPLITS_ROOT
-                candidates.append(os.path.join(data_root, str(dataset_name), gene_list))
-
-            for cand in candidates:
-                if cand and os.path.isfile(cand):
-                    num_genes = _try_count_genes(cand)
-                    if num_genes is not None:
-                        break  # stop at the first working location
-
-        
-
 
         # Search for dataset_results.json
         dataset_results_path = os.path.join(run_path, "dataset_results.json")
@@ -232,301 +102,47 @@ def summarize_runs(root_dir):
                     best_entry = max(all_results, key=lambda x: x["pearson_mean"])
                     highest_mean = best_entry["pearson_mean"]
                     highest_std = best_entry["pearson_std"]
-                    best_model = best_entry["encoder_name"]
+                    best_model = best_entry['encoder_name']
+
+        # get dataset name
+        dataset = config_data.get("datasets", [None])[0] if config_found else None
+
+        # --- Try to load gene list file using dataset + gene_list_name ---
+        num_genes = None
+        if dataset and gene_list:
+            gene_file = Path(DEFAULT_SPLITS_ROOT, dataset, gene_list)
+            try:
+                with open(gene_file, "r") as f:
+                    genes = json.load(f)
+                if isinstance(genes, dict):
+                    num_genes = len(genes["genes"])
+            except Exception:
+                num_genes = None
 
         summary.append({
             "run": run,
             "gene_list": gene_list,
-            "num_genes": num_genes,
+            'num_genes': num_genes,
             "alpha": config_data.get("alpha"),
             "batch_size": config_data.get("batch_size"),
             "dimreduce": config_data.get("dimreduce"),
             "encoders": ", ".join(config_data.get("encoders", [])) if config_found else None,
             "normalize": config_data.get("normalize"),
-            "library_size_normalize": config_data.get("library_size_normalize", False), # ensure library_size_normalize defaults to False if missing 
             "latent_dim": config_data.get("latent_dim"),
             "method": config_data.get("method"),
-            "dataset": config_data.get("datasets", [None])[0] if config_found else None,
-            "best_model": best_model,
+            "dataset": dataset,
+            "best_model":best_model,
             "highest_pearson_mean": highest_mean,
-            "highest_pearson_std": highest_std,
+            "highest_pearson_std": highest_std
         })
 
     df = pd.DataFrame(summary)
-
-    # >>> Add num_training_patches_mean here <<<
-    df = add_num_training_patches_mean(
-        df,
-        xenium_csv=DEFAULT_EXTRA_METADATA,
-        broad_csv=DEFAULT_BROAD_METADATA,
-    )
 
     # --- Sort by dataset and highest mean ---
     if not df.empty:
         df = df.sort_values(by=["dataset", 'gene_list', "highest_pearson_mean"], ascending=[True, True, False]).reset_index(drop=True)
 
     return df
-
-
-from pathlib import Path
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from IPython.display import display
-from adjustText import adjust_text
-
-
-def _default_outdir(outdir: str | None) -> Path:
-    """Return Path for outdir, defaulting to hest/eval/summary_plots."""
-    if outdir is None:
-        outdir = Path(DEFAULT_SUMMARY_PLOT_DIR)
-    else:
-        outdir = Path(outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-    return outdir
-
-
-def plot_summary_bar(best_df: pd.DataFrame,
-                     outdir: str | None = None,
-                     filename: str = "summary_barplot.png",
-                     show: bool = False):
-    """
-    Barplot of highest_pearson_mean ± highest_pearson_std per run.
-    - Grouped and colored by dataset
-    - Within each dataset, runs sorted by mean desc
-    - Each bar labeled with num_genes, offset to avoid overlapping error bar
-    """
-    if best_df.empty:
-        print("[plot_summary_bar] Empty DataFrame.")
-        return None
-
-    df = best_df.copy()
-    df["highest_pearson_mean"] = pd.to_numeric(df["highest_pearson_mean"], errors="coerce")
-    df["highest_pearson_std"] = pd.to_numeric(df["highest_pearson_std"], errors="coerce").fillna(0.0)
-    df["num_genes"] = pd.to_numeric(df["num_genes"], errors="coerce").fillna(0).astype(int)
-    df["dataset"] = df["dataset"].astype(str).fillna("Unknown")
-
-    datasets = sorted(df["dataset"].unique().tolist())
-    palette = plt.get_cmap("tab10", len(datasets))
-    color_map = {ds: palette(i) for i, ds in enumerate(datasets)}
-
-    # Order: dataset then mean desc
-    ordered = []
-    for ds in datasets:
-        sub = df[df["dataset"] == ds].sort_values("highest_pearson_mean", ascending=False)
-        ordered.append(sub)
-    df = pd.concat(ordered)
-
-    labels = (df["dataset"] + " | " + df["gene_list"]).tolist()
-    x = np.arange(len(df))
-    means = df["highest_pearson_mean"].to_numpy()
-    errs = df["highest_pearson_std"].to_numpy()
-    colors = [color_map[ds] for ds in df["dataset"]]
-    nums = df["num_genes"].to_numpy()
-
-    fig, ax = plt.subplots(figsize=(max(12, len(df)*0.5), 8))
-    bars = ax.bar(x, means, yerr=errs, color=colors, capsize=4, edgecolor="black")
-
-    for bar, val, err, ng in zip(bars, means, errs, nums):
-        height = bar.get_height()
-        va = "bottom" if height >= 0 else "top"
-        ax.annotate(str(ng),
-                    xy=(bar.get_x() + bar.get_width()/2, height + (err if height >= 0 else -err)),
-                    xytext=(0, 5 if height >= 0 else -5), textcoords="offset points",
-                    ha="center", va=va, fontsize=9)
-
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=60, ha="right")
-    ax.set_ylabel("Pearson correlation (mean ± std)")
-    ax.set_title("Run summary grouped by dataset (label = num_genes)")
-    ax.grid(True, axis="y", linestyle=":", alpha=0.4)
-
-    handles = [plt.Rectangle((0,0),1,1, color=color_map[ds], edgecolor="black") for ds in datasets]
-    ax.legend(handles, datasets, title="Dataset", bbox_to_anchor=(1.02, 1), loc="upper left")
-
-    fig.tight_layout()
-
-    outdir = _default_outdir(outdir)
-    path = outdir / filename
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-
-    if show:
-        display(fig)
-
-    return fig
-
-
-def plot_summary_genes_vs_mean(best_df: pd.DataFrame,
-                               outdir: str | None = None,
-                               filename: str = "summary_genes_vs_mean.png",
-                               show: bool = False):
-    """
-    Scatter: x = highest_pearson_mean, y = num_genes, colored by dataset.
-    """
-    if best_df is None or best_df.empty:
-        print("[plot_summary_genes_vs_mean] Empty DataFrame.")
-        return None
-
-    df = best_df.copy()
-    need = {"dataset", "num_genes", "highest_pearson_mean"}
-    missing = need - set(df.columns)
-    if missing:
-        raise ValueError(f"[plot_summary_genes_vs_mean] Missing columns: {missing}")
-
-    df["dataset"] = df["dataset"].astype("string").fillna("Unknown")
-    df["num_genes"] = pd.to_numeric(df["num_genes"], errors="coerce")
-    df["highest_pearson_mean"] = pd.to_numeric(df["highest_pearson_mean"], errors="coerce")
-    df = df.dropna(subset=["num_genes", "highest_pearson_mean"])
-    if df.empty:
-        print("[plot_summary_genes_vs_mean] No valid rows.")
-        return None
-
-    datasets = sorted(df["dataset"].dropna().unique().tolist())
-    cmap = plt.get_cmap("tab10", len(datasets))
-    color_map = {ds: cmap(i) for i, ds in enumerate(datasets)}
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-    for ds in datasets:
-        sub = df[df["dataset"] == ds]
-        ax.scatter(
-            sub["highest_pearson_mean"].to_numpy(dtype=float),
-            sub["num_genes"].to_numpy(dtype=float),
-            label=str(ds),
-            alpha=0.85,
-            edgecolors="black",
-            linewidths=0.5,
-            color=color_map[ds],
-        )
-
-    ax.set_xlabel("Mean Pearson correlation")
-    ax.set_ylabel("Number of genes")
-    ax.set_title("Gene count vs performance (colored by dataset)")
-    ax.grid(True, linestyle=":", alpha=0.4)
-    ax.legend(title="Dataset", bbox_to_anchor=(1.02, 1), loc="upper left")
-    fig.tight_layout()
-
-    outdir = _default_outdir(outdir)
-    path = outdir / filename
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-
-    if show:
-        display(fig)
-
-    return fig
-
-
-def plot_summary_patches_vs_mean(best_df: pd.DataFrame,
-                                 outdir: str | None = None,
-                                 filename: str = "summary_patches_vs_mean.png",
-                                 show: bool = False,
-                                 figsize=(9, 7),
-                                 size_scale: float = 0.05,
-                                 min_size: float = 30,
-                                 size_legend_values: list[int] = None):
-    """
-    Scatter:
-      x = highest_pearson_mean
-      y = num_training_patches_mean
-      dot size = num_genes
-      color = dataset
-      label = gene_list (without .json), repelled with connectors
-      size legend shows num_genes examples
-    """
-    if best_df is None or best_df.empty:
-        print("[plot_summary_patches_vs_mean] Empty DataFrame.")
-        return None
-
-    need = {"dataset", "gene_list", "highest_pearson_mean", "num_training_patches_mean", "num_genes"}
-    missing = need - set(best_df.columns)
-    if missing:
-        raise ValueError(f"[plot_summary_patches_vs_mean] Missing columns: {missing}")
-
-    df = best_df.copy()
-    df["dataset"] = df["dataset"].astype(str).fillna("Unknown")
-    df["gene_list"] = df["gene_list"].astype(str).fillna("Unknown").str.replace(".json", "", regex=False)
-    df["highest_pearson_mean"] = pd.to_numeric(df["highest_pearson_mean"], errors="coerce")
-    df["num_training_patches_mean"] = pd.to_numeric(df["num_training_patches_mean"], errors="coerce")
-    df["num_genes"] = pd.to_numeric(df["num_genes"], errors="coerce")
-
-    df = df.dropna(subset=["highest_pearson_mean", "num_training_patches_mean", "num_genes"])
-    if df.empty:
-        print("[plot_summary_patches_vs_mean] No valid rows.")
-        return None
-
-    datasets = sorted(df["dataset"].unique().tolist())
-    cmap = plt.get_cmap("tab10", len(datasets))
-    color_map = {ds: cmap(i) for i, ds in enumerate(datasets)}
-
-    fig, ax = plt.subplots(figsize=figsize)
-    texts = []
-
-    for ds in datasets:
-        sub = df[df["dataset"] == ds]
-        ax.scatter(
-            sub["highest_pearson_mean"],
-            sub["num_training_patches_mean"],
-            s=(sub["num_genes"] * size_scale).clip(lower=min_size),
-            alpha=0.9,
-            edgecolors="black",
-            linewidths=0.5,
-            color=color_map[ds],
-            label=ds,
-        )
-        for _, row in sub.iterrows():
-            texts.append(
-                ax.text(
-                    row["highest_pearson_mean"],
-                    row["num_training_patches_mean"],
-                    row["gene_list"],
-                    fontsize=8,
-                )
-            )
-
-    adjust_text(
-        texts,
-        ax=ax,
-        expand_points=(1.2, 1.4),
-        expand_text=(1.2, 1.4),
-        arrowprops=dict(arrowstyle="-", color="gray", lw=0.5)
-    )
-
-    ax.set_xlabel("Mean Pearson correlation")
-    ax.set_ylabel("Mean number of training patches per split")
-    ax.set_title("Training patches vs performance (dot size = num_genes)")
-    ax.grid(True, linestyle=":", alpha=0.4)
-
-    # Dataset legend
-    handles, labels = ax.get_legend_handles_labels()
-    leg1 = ax.legend(handles, labels, title="Dataset", bbox_to_anchor=(1.02, 1), loc="upper left")
-
-    # Size legend
-    if size_legend_values is None:
-        size_legend_values = [int(df["num_genes"].min()),
-                              int(df["num_genes"].median()),
-                              int(df["num_genes"].max())]
-        size_legend_values = sorted(set(size_legend_values))
-    size_handles = [
-        plt.scatter([], [],
-                    s=max(min_size, val*size_scale),
-                    color="gray", alpha=0.6, edgecolors="black")
-        for val in size_legend_values
-    ]
-    leg2 = ax.legend(size_handles, [f"{v} genes" for v in size_legend_values],
-                     title="Num genes (dot size)",
-                     bbox_to_anchor=(1.02, 0.4), loc="upper left")
-    ax.add_artist(leg1)
-
-    fig.tight_layout()
-
-    outdir = _default_outdir(outdir)
-    path = outdir / filename
-    fig.savefig(path, dpi=200, bbox_inches="tight")
-
-    if show:
-        display(fig)
-
-    return fig
-
 
 def best_results_by_gene_and_dataset(df):
     """
@@ -549,7 +165,6 @@ def best_results_by_gene_and_dataset(df):
     )
     
     return df.loc[idx].reset_index(drop=True)
-
 
 
 def _safe_read_json(path: Path) -> dict:
@@ -750,8 +365,8 @@ def get_test_splits(run: str,
     ds_l = str(dataset_name).strip().lower()
     if ds_l in {"xeniumpr1", "pilot"} and Path(extra_metadata_csv).exists():
         meta = pd.read_csv(extra_metadata_csv)
-        df_test = df_test.merge(meta, left_on="test_sample", right_on="sample_id", how="left")
-        df_test = df_test.drop(columns=["sample_id"], errors="ignore").convert_dtypes().fillna(pd.NA)
+        df_test = df_test.merge(meta, left_on="test_sample", right_on="SampleID", how="left")
+        df_test = df_test.drop(columns=["SampleID"], errors="ignore").convert_dtypes().fillna(pd.NA)
 
     return df_test
 

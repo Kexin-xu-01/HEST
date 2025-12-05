@@ -82,19 +82,6 @@ class Conchv15InferenceEncoder(BasePatchEncoder):
 
         self.enc_name = 'conch_v15'
 
-        # # prefer explicit weights_path passed by HEST, fallback to whatever BasePatchEncoder provides
-        # weights_path = self._weights_path if self._weights_path is not None else self._get_weights_path()
-
-        # if weights_path:
-        #     try:
-        #         model, eval_transform = create_model_from_pretrained(checkpoint_path=weights_path, img_size=img_size)
-        #     except Exception:
-        #         traceback.print_exc()
-        #         raise Exception(
-        #             f"Failed to create CONCH v1.5 model from local checkpoint at '{weights_path}'. "
-        #             "You can download the required `pytorch_model_vision.bin` and `config.json` from: https://huggingface.co/MahmoodLab/conchv1_5."
-        #         )
-        # else:
         self.ensure_has_internet(self.enc_name)
         try:
             model, eval_transform = create_model_from_pretrained(
@@ -304,7 +291,6 @@ class UNI2InferenceEncoder(InferenceEncoder):
 
         # exact timm kwargs recommended by model card
         timm_kwargs = dict(
-            #model_name='vit_giant_patch14_224',
             img_size=224,
             patch_size=14,
             depth=24,
@@ -348,7 +334,6 @@ class UNI2InferenceEncoder(InferenceEncoder):
                 f"\nFast attempt error: {fast_exc}\nHF download error: {e_hf}"
             )
 
-        # Now construct the model architecture and load the strict state dict
         try:
             model = timm.create_model(pretrained=False, **timm_kwargs)  # note pretrained=False
             state = torch.load(local_ckpt, map_location="cpu")
@@ -358,7 +343,6 @@ class UNI2InferenceEncoder(InferenceEncoder):
             else:
                 state_dict = state
             model.load_state_dict(state_dict, strict=True)
-            # Build transform with the model's pretrained_cfg (if available), else fallback to ImageNet normalisation
             try:
                 eval_transform = create_transform(**resolve_data_config(model.pretrained_cfg, model=model))
             except Exception:
@@ -382,7 +366,6 @@ class UNI2InferenceEncoder(InferenceEncoder):
             )
 
     def forward(self, x):
-        # same robust forward as you already used
         try:
             out = self.model(x)
         except Exception:
@@ -526,12 +509,10 @@ class HOptimus1InferenceEncoder(InferenceEncoder):
         import timm
         from torchvision import transforms
 
-        # HF hub timm model name for H-optimus-1
         model = timm.create_model("hf-hub:bioptimus/H-optimus-1", pretrained=True, **timm_kwargs)
 
-        # same normalization as HOptimus0 - adjust if you have different constants for v1
         eval_transform = transforms.Compose([
-            transforms.Resize(224), #HOptimus was trained on 224
+            transforms.Resize(224), 
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=(0.707223, 0.578729, 0.703617), 

@@ -103,7 +103,7 @@ class HESTData:
             self._tissue_contours = tissue_contours
         
         if 'total_counts' not in self.adata.var_names and len(self.adata) > 0:
-            sc.pp.calculate_qc_metrics(self.adata, inplace=True)
+            sc.pp.calculate_qc_metrics(self.adata, inplace=True,percent_top=(50, 100, 200)) # remove the default 500 as not enough variables
         
         
     def __repr__(self):

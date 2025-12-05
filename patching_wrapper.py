@@ -30,7 +30,6 @@ def load_hest_sample(sample_dir: Path):
     # files
     adata_path = sample_dir / "aligned_adata.h5ad"
     image_path = sample_dir / "aligned_fullres_HE.tif"
-    cells_path = sample_dir / "aligned_cells.h5ad"
     metrics_path = sample_dir / "metrics.json"
     
     # Look for any .geojson under tissue_seg
@@ -43,8 +42,6 @@ def load_hest_sample(sample_dir: Path):
         raise FileNotFoundError(f"Missing {adata_path}")
     if not image_path.exists():
         raise FileNotFoundError(f"Missing {image_path}")
-    if not cells_path.exists():
-        raise FileNotFoundError(f"Missing {cells_path}")
 
     # load AnnData
     adata = sc.read_h5ad(adata_path)
@@ -130,20 +127,7 @@ def patch_hest_samples(
                 threshold=threshold,
             )
 
-            # Try common kw names for the mask folder; fall back gracefully
-            if has_tissue_seg:
-                tried_any = False
-                for mask_kw in ("mask_dir", "tissue_mask_dir"):
-                    try:
-                        st.dump_patches(**dump_kwargs, **{mask_kw: str(tissue_seg_dir)})
-                        tried_any = True
-                        break
-                    except TypeError:
-                        continue
-                if not tried_any:
-                    st.dump_patches(**dump_kwargs)
-            else:
-                st.dump_patches(**dump_kwargs)
+            st.dump_patches(**dump_kwargs)
 
             # Move visualization into sample's patches_vis
             default_vis_path = sample_patches_dir / f"{sample_id}_patch_vis.png"
@@ -168,6 +152,8 @@ def show_images(
     figsize=(4, 4),               # size of each grid cell (in inches)
     max_images=None,              # optional global cap on total images
     max_images_per_sample=None,   # optional cap per sample
+    save_dir: Path | str | None = None,   # <-- NEW
+    save_name: str = "patches_vis.png",  
     max_display_px=1024,          # max width/height for displayed images
 ):
     """
@@ -263,6 +249,15 @@ def show_images(
     plt.tight_layout()
     plt.show()
 
+    # --- NEW: Save output image if requested ---
+    if save_dir is not None:
+        save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        save_path = save_dir / save_name
+        fig.savefig(save_path, bbox_inches="tight")
+        print(f"✅ Saved figure to {save_path}")
+
+    plt.close(fig)
 
 
 def count_patches(broad_root, save_csv=None):
@@ -518,3 +513,65 @@ def visualise_patch_block(
 
     plt.tight_layout(pad=0)
     plt.show()
+
+
+def visualise_first_n_patches(h5_file_path, wsi_path=None, max_patches=20, highlight_color="yellow"):
+    """
+    Visualize patches and their locations on the original WSI.
+
+    Args:
+        h5_file_path (str or Path): path to the patch .h5 file
+        wsi_path (str or Path, optional): path to the downscaled WSI image for background
+        max_patches (int): maximum number of patches to display in image grid
+        highlight_color (str): color to highlight selected patches on WSI
+    """
+    h5_file_path = Path(h5_file_path)
+    
+    with h5py.File(h5_file_path, "r") as f:
+        patches = f["img"][:]         # shape: (num_patches, H, W, C)
+        coords = f["coords"][:]       # shape: (num_patches, 2) top-left x, y
+        barcodes = f["barcode"][:]    # barcodes (optional)
+
+    num_patches = patches.shape[0]
+    print(f"Loaded {num_patches} patches, showing first {min(max_patches, num_patches)}")
+
+    # -------------------
+    # 1️⃣ Show a few patches
+    # -------------------
+    n_show = min(max_patches, num_patches)
+    ncols = min(5, n_show)
+    nrows = (n_show + ncols - 1) // ncols
+    plt.figure(figsize=(3*ncols, 3*nrows))
+    for i in range(n_show):
+        plt.subplot(nrows, ncols, i+1)
+        plt.imshow(patches[i])
+        plt.axis("off")
+        plt.title(barcodes[i].decode("utf-8") if isinstance(barcodes[i], bytes) else str(barcodes[i]), fontsize=8)
+    plt.suptitle("Sample Patches")
+    plt.tight_layout()
+    plt.show()
+
+    # -------------------
+    # 2️⃣ Show patch locations on WSI with highlights
+    # -------------------
+    if wsi_path is not None:
+        wsi = Image.open(wsi_path)
+        wsi = np.array(wsi)
+
+        plt.figure(figsize=(8,8))
+        plt.imshow(wsi)
+
+        # plot ALL patch locations in red
+        plt.scatter(coords[:,0], coords[:,1], s=10, c="red", alpha=0.3, label="All patches")
+
+        # highlight SELECTED patches (first n_show) in different color
+        selected_coords = coords[:n_show]
+        plt.scatter(selected_coords[:,0], selected_coords[:,1],
+                    s=40, c=highlight_color, edgecolor="black", label="Highlighted patches")
+
+        plt.title("Patch Locations on WSI")
+        plt.axis("off")
+        plt.legend()
+        plt.show()
+    else:
+        print("[INFO] wsi_path not provided, skipping WSI location overlay.")

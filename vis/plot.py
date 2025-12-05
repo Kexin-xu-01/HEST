@@ -108,6 +108,8 @@ def add_num_training_patches_mean(
     # xenium means
     xen_mean_num_patches = _safe_mean_ci(xen, ["num_patches_100um_unfiltered"])
     xen_mean_num_patches_segger = _safe_mean_ci(xen, ["num_patches_100um"])
+    xen_mean_num_patches_50um = _safe_mean_ci(xen, ["num_patches_50um"])
+    xen_mean_num_patches_25um = _safe_mean_ci(xen, ["num_patches_25um"])
 
     # pilot subset (two sample IDs)
     pilot_ids = {"XeniumPR1S1ROI2", "XeniumPR1S1ROI3"}
@@ -130,11 +132,39 @@ def add_num_training_patches_mean(
             return xen_mean_num_patches * 14
         elif ds == "XeniumPR1_segger":
             return xen_mean_num_patches_segger * 14
+        elif ds == "XeniumPR1_50um":
+            return xen_mean_num_patches_50um * 14
+        elif ds == "XeniumPR1_50um_0.25_um_px":
+            return xen_mean_num_patches_50um * 14
+        elif ds == "XeniumPR1_25um":
+            return xen_mean_num_patches_25um * 14
+        elif ds == "XeniumPR1_25um_0.125_um_px":
+            return xen_mean_num_patches_25um * 14
+        elif ds == "XeniumPR2":
+            return xen_mean_num_patches * 7
+        elif ds == "XeniumPR3":
+            return xen_mean_num_patches * 7
+        elif ds == "XeniumPR":
+            return xen_mean_num_patches * 28 # PR1-3
+        elif ds == "XeniumPR_LOOCV":
+            return xen_mean_num_patches * 30 # PR1-3
+        elif ds == "XeniumPR4":
+            return xen_mean_num_patches * 19
+        elif ds == "XeniumPR5":
+            return xen_mean_num_patches * 20
+        elif ds == "XeniumPR4-5":
+            return xen_mean_num_patches * 39
+        elif ds == "XeniumR2-6":
+            return xen_mean_num_patches * 37
+        elif ds == "XeniumR_LOOCV":
+            return xen_mean_num_patches * 44
+        elif ds == "XeniumR":
+            return xen_mean_num_patches * 43
         elif ds == "broad":
             return brd_mean_num_patches * 6
         elif ds == "XeniumPR1_broad":
-            a = brd_mean_num_patches * 7   # total number of broad patches
-            b = xen_mean_num_patches_segger * 15  # total number of xeniumpr1 patches
+            a = brd_mean_num_patches * 7
+            b = xen_mean_num_patches_segger * 15
             if pd.isna(a) and pd.isna(b):
                 return np.nan
             return (0 if pd.isna(a) else a + 0) / 2 if pd.isna(b) else ((a + b) / 2)
@@ -145,6 +175,99 @@ def add_num_training_patches_mean(
 
     out["num_training_patches_mean"] = out.apply(_compute, axis=1)
     return out
+
+# def add_num_training_patches(
+#     df_summary: pd.DataFrame,
+#     xenium_csv: str = "/project/simmons_hts/kxu/hest/hest_directory.csv",
+#     broad_csv: str = "/project/simmons_hts/kxu/hest/broad_directory.csv",
+# ) -> pd.DataFrame:
+#     """
+#     Compute num_training_patches_mean per dataset using only the sample IDs
+#     that belong to that dataset (case-insensitive substring match).
+
+#     Uses:
+#       - XeniumPR2/PR3 -> num_patches_100um
+#       - XeniumPR1 -> num_patches_100um_unfiltered
+#       - Segger, 50um, 25um variants use their matching columns
+#     """
+#     out = df_summary.copy()
+
+#     # ---- read metadata ----
+#     try:
+#         xen = pd.read_csv(xenium_csv)
+#     except Exception:
+#         xen = pd.DataFrame()
+
+#     try:
+#         brd = pd.read_csv(broad_csv)
+#     except Exception:
+#         brd = pd.DataFrame()
+
+#     # ---- helpers ----
+#     def _find_col_ci(df, target):
+#         if df.empty:
+#             return None
+#         lowmap = {c.lower(): c for c in df.columns}
+#         return lowmap.get(target.lower())
+
+#     def _find_any_col_ci(df, targets):
+#         for t in targets:
+#             col = _find_col_ci(df, t)
+#             if col is not None:
+#                 return col
+#         return None
+
+#     def _mean_for_dataset_substring(df, substring, col_candidates):
+#         """Compute mean only for rows whose sample_id contains substring."""
+#         if df.empty:
+#             return np.nan
+#         col = _find_any_col_ci(df, col_candidates)
+#         sample_col = _find_col_ci(df, "sample_id")
+#         if col is None or sample_col is None:
+#             return np.nan
+#         mask = df[sample_col].astype(str).str.contains(substring, case=False, na=False)
+#         vals = pd.to_numeric(df.loc[mask, col], errors="coerce").dropna()
+#         return vals.mean() if not vals.empty else np.nan
+
+#     # ---- compute per dataset ----
+#     def _compute(row):
+#         ds = str(row.get("dataset", "")).strip()
+#         # if ds == "pilot":
+#         #     return _mean_for_dataset_substring(xen,{"XeniumPR1S1ROI2", "XeniumPR1S1ROI3"}, ["num_patches_100um_unfiltered"])
+#         if ds == "XeniumPR1":
+#             return _mean_for_dataset_substring(xen, "XeniumPR1", ["num_patches_100um_unfiltered"]) * 14
+#         elif ds == "XeniumPR1_segger":
+#             return _mean_for_dataset_substring(xen, "XeniumPR1_segger", ["num_patches_100um"])
+#         elif ds == "XeniumPR1_50um":
+#             return _mean_for_dataset_substring(xen, "XeniumPR1", ["num_patches_50um"]) * 14
+#         elif ds == "XeniumPR1_25um":
+#             return _mean_for_dataset_substring(xen, "XeniumPR1", ["num_patches_25um"]) * 14
+#         elif ds == "XeniumPR2":
+#             return _mean_for_dataset_substring(xen, "XeniumPR2", ["num_patches_100um"]) * 7
+#         elif ds == "XeniumPR3":
+#             return _mean_for_dataset_substring(xen, "XeniumPR3", ["num_patches_100um"]) * 7
+#         elif ds == "XeniumPR":
+#             return _mean_for_dataset_substring(xen, "XeniumPR", ["num_patches_100um"]) * 28 # 31 sample, 3 test sets 
+#         elif ds == "broad":
+#             return _mean_for_dataset_substring(brd, "broad", ["num_patches_100um"]) * 6
+#         elif ds == "XeniumPR1_broad":
+#             a = _mean_for_dataset_substring(brd, "broad", ["num_patches_100um"]) * 7
+#             b = _mean_for_dataset_substring(xen, "XeniumPR1", ["num_patches_100um"]) * 15
+#             if pd.isna(a) and pd.isna(b):
+#                 return np.nan
+#             if pd.isna(b):
+#                 return a
+#             if pd.isna(a):
+#                 return b
+#             return (a + b) / 2
+#         elif ds == "broad_cell_centered":
+#             return _mean_for_dataset_substring(brd, "broad", ["num_patches_cell_centered"]) * 6
+#         else:
+#             return np.nan
+
+#     out["num_training_patches_mean"] = out.apply(_compute, axis=1)
+#     return out
+
 
 
 def summarize_runs(root_dir):
@@ -218,8 +341,6 @@ def summarize_runs(root_dir):
                         break  # stop at the first working location
 
         
-
-
         # Search for dataset_results.json
         dataset_results_path = os.path.join(run_path, "dataset_results.json")
         highest_mean = None
@@ -463,8 +584,8 @@ def plot_summary_patches_vs_mean(best_df: pd.DataFrame,
     for ds in datasets:
         sub = df[df["dataset"] == ds]
         ax.scatter(
-            sub["highest_pearson_mean"],
             sub["num_training_patches_mean"],
+            sub["highest_pearson_mean"],
             s=(sub["num_genes"] * size_scale).clip(lower=min_size),
             alpha=0.9,
             edgecolors="black",
@@ -475,8 +596,8 @@ def plot_summary_patches_vs_mean(best_df: pd.DataFrame,
         for _, row in sub.iterrows():
             texts.append(
                 ax.text(
-                    row["highest_pearson_mean"],
                     row["num_training_patches_mean"],
+                    row["highest_pearson_mean"],
                     row["gene_list"],
                     fontsize=8,
                 )
@@ -490,9 +611,9 @@ def plot_summary_patches_vs_mean(best_df: pd.DataFrame,
         arrowprops=dict(arrowstyle="-", color="gray", lw=0.5)
     )
 
-    ax.set_xlabel("Mean Pearson correlation")
-    ax.set_ylabel("Mean number of training patches per split")
-    ax.set_title("Training patches vs performance (dot size = num_genes)")
+    ax.set_xlabel("Mean number of training patches per split")
+    ax.set_ylabel("Mean Pearson correlation")
+    ax.set_title("Performance vs training patches vs  (dot size = num_genes)")
     ax.grid(True, linestyle=":", alpha=0.4)
 
     # Dataset legend
@@ -696,6 +817,30 @@ def annotate_genes_with_curated(df_genes: pd.DataFrame, path_meta = "/project/si
     else:
         df_condition = pd.DataFrame(columns=["gene", "condition"])
 
+    # coeliac genes
+    if "Coeliac" in m.columns:
+        df_coeliac = (
+            m[["Coeliac"]]
+            .dropna()
+            .rename(columns={"Coeliac": "gene"})
+        )
+        df_coeliac["coeliac"] = "coeliac"
+        df_coeliac = df_coeliac.drop_duplicates(subset=["gene"])
+    else:
+        df_coeliac = pd.DataFrame(columns=["gene", "coeliac"])
+
+    # tcr genes
+    if "TCR" in m.columns:
+        df_tcr = (
+            m[["TCR"]]
+            .dropna()
+            .rename(columns={"TCR": "gene"})
+        )
+        df_tcr["tcr"] = "tcr"
+        df_tcr = df_tcr.drop_duplicates(subset=["gene"])
+    else:
+        df_tcr = pd.DataFrame(columns=["gene", "tcr"])
+
     # 3) (optional) case-insensitive merge keys
     def _prep_key(df, col="gene"):
         out = df.copy()
@@ -710,11 +855,15 @@ def annotate_genes_with_curated(df_genes: pd.DataFrame, path_meta = "/project/si
     p   = _prep_key(df_panel, "gene")
     ct  = _prep_key(df_celltype, "gene")
     cond= _prep_key(df_condition, "gene")
+    coeliac= _prep_key(df_coeliac, "gene")
+    tcr= _prep_key(df_tcr, "gene")
 
     # 4) left-merge the three annotations
     out = g.merge(p[["_gk", "panel"]], on="_gk", how="left")
     out = out.merge(ct[["_gk", "cell_type"]], on="_gk", how="left")
     out = out.merge(cond[["_gk", "condition"]], on="_gk", how="left")
+    out = out.merge(coeliac[["_gk", "coeliac"]], on="_gk", how="left")
+    out = out.merge(tcr[["_gk", "tcr"]], on="_gk", how="left")
 
     # 5) clean up
     out = out.drop(columns=["_gk"]).convert_dtypes().fillna(pd.NA)
@@ -748,7 +897,8 @@ def get_test_splits(run: str,
     df_test = pd.DataFrame(rows).convert_dtypes().fillna(pd.NA)
 
     ds_l = str(dataset_name).strip().lower()
-    if ds_l in {"xeniumpr1", "pilot"} and Path(extra_metadata_csv).exists():
+    #if ds_l in {"xeniumpr1", "pilot",} and Path(extra_metadata_csv).exists():
+    if "broad" not in ds_l and Path(extra_metadata_csv).exists():
         meta = pd.read_csv(extra_metadata_csv)
         df_test = df_test.merge(meta, left_on="test_sample", right_on="sample_id", how="left")
         df_test = df_test.drop(columns=["sample_id"], errors="ignore").convert_dtypes().fillna(pd.NA)
@@ -924,8 +1074,8 @@ def plot_gene_correlation_barplot_grouped(df_genes, group_by='cell_type', show_m
     Returns:
         matplotlib.figure.Figure: Figure object for further saving or manipulation.
     """
-    if group_by not in ['cell_type', 'condition', 'panel']:
-        raise ValueError("group_by must be 'cell_type' or 'condition' or 'panel")
+    if group_by not in ['cell_type', 'condition', 'panel','tcr','coeliac']:
+        raise ValueError("group_by must be 'cell_type' or 'condition' or 'panel' or 'tcr' or'coeliac'")
     
     # Filter out rows where grouping column is NA
     df_plot = df_genes[df_genes[group_by].notna()].copy()
@@ -989,7 +1139,6 @@ def plot_gene_correlation_histogram(df, dataset_name, encoder_name,
     ax.set_ylabel("Number of genes")
     ax.set_title(_format_title("Gene Correlation Histogram", dataset_name, encoder_name))
     return fig
-
 
 
 def plot_corrs_by_sample(
@@ -1078,6 +1227,133 @@ def plot_corrs_by_sample(
 
     return fig
 
+def plot_corrs_by_sample(
+    df,
+    dataset_name,
+    encoder_name,
+    group_by: str | None = None,
+    figsize=(16, 6)
+):
+    """
+    Plot per-split gene correlations grouped by metadata, and return the figure object.
+
+    Behavior:
+      - If group_by is None: one box per sample, single color.
+      - If group_by is categorical: behaves like your original function (box split by hue).
+      - If group_by is numeric (e.g. 'num_patches'): one box per sample, colored by numeric value with a colorbar.
+
+    Args:
+        df (pd.DataFrame): must contain columns:
+            [split, gene, corr, test_sample, Sample_type, Location, cell_type, condition, ...]
+        group_by (str or None): column to color/group samples by.
+        figsize (tuple): figure size.
+
+    Returns:
+        matplotlib.figure.Figure
+    """
+    import pandas as pd
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+
+    df = df.copy()
+
+    if group_by is not None and group_by not in df.columns:
+        raise ValueError(f"{group_by} must be a column in df")
+
+    # ---------------- ordering of x-axis ----------------
+    if group_by is not None:
+        # if categorical: order groups by mean corr, then samples within each group
+        if pd.api.types.is_numeric_dtype(df[group_by]):
+            # For numeric group_by we still want to order samples by mean corr
+            sample_means = df.groupby("test_sample")["corr"].mean().sort_values(ascending=False)
+            x_order = sample_means.index.tolist()
+        else:
+            group_means = df.groupby(group_by)["corr"].mean().sort_values(ascending=False)
+            group_order = group_means.index.tolist()
+            x_order = []
+            for grp in group_order:
+                samples = (
+                    df.loc[df[group_by] == grp, "test_sample"]
+                      .dropna()
+                      .drop_duplicates()
+                      .tolist()
+                )
+                x_order.extend(samples)
+            x_order = list(dict.fromkeys(x_order))
+    else:
+        sample_means = df.groupby("test_sample")["corr"].mean().sort_values(ascending=False)
+        x_order = sample_means.index.tolist()
+
+    df["test_sample"] = pd.Categorical(df["test_sample"], categories=x_order, ordered=True)
+
+    # ---------------- plotting ----------------
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if group_by is None:
+        # original simple single-color boxplot per sample
+        sns.boxplot(
+            data=df,
+            x="test_sample",
+            y="corr",
+            color="skyblue",
+            showfliers=False,
+            ax=ax,
+        )
+        ax.set_xlabel("Test Sample")
+    else:
+        # If group_by is numeric: draw one box per sample and color by numeric value
+        if pd.api.types.is_numeric_dtype(df[group_by]):
+                # Compute average numeric value per test_sample
+            mean_vals = df.groupby("test_sample")[group_by].mean()
+
+            # Create a colormap
+            cmap = plt.cm.viridis
+            norm = plt.Normalize(vmin=df[group_by].min(), vmax=df[group_by].max())
+            colors = mean_vals.map(lambda x: cmap(norm(x)))
+
+            # Draw boxplot with palette based on numeric variable
+            sns.boxplot(
+                data=df,
+                x="test_sample",
+                y="corr",
+                order=mean_vals.index,
+                palette=colors.to_dict(),
+                showfliers=False,
+                ax=ax
+            )
+
+            # Add colorbar
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            fig.colorbar(sm, ax=ax, label=group_by)
+            
+            ax.legend(title=group_by, bbox_to_anchor=(1.05, 1), loc="upper left")
+            ax.set_xlabel(f"Test Sample (grouped by {group_by})")
+
+        else:
+            # categorical behavior (original behavior with hue)
+            sns.boxplot(
+                data=df,
+                x="test_sample",
+                y="corr",
+                hue=group_by,
+                showfliers=False,
+                palette="tab20",
+                ax=ax,
+            )
+            ax.legend(title=group_by, bbox_to_anchor=(1.05, 1), loc="upper left")
+            ax.set_xlabel(f"Test Sample (grouped by {group_by})")
+
+    # ---------------- styling ----------------
+    plt.xticks(rotation=60, ha="right")
+    ax.set_ylabel("Gene Correlation")
+    ax.set_title(f"Per-sample correlation | Data: {dataset_name} | Model: {encoder_name}")
+    plt.tight_layout()
+
+    return fig
+
+
 
 # -----------------------
 # High-level workflow
@@ -1107,6 +1383,144 @@ def generate_all_plots(
         * Gene-level grouping supported for: panel, cell_type, condition (needs curated_xlsx).
         * Per-sample grouping supported for any column present in df_long (e.g., Sample_type, Location, panel, cell_type, condition).
     Saves into <runs_root>/<run>/plots with simple filenames.
+    """
+    # Paths
+    run_dir = Path(runs_root) / run
+    outdir = run_dir / "plots"
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # 1) Best model + gene correlations (k-fold aware)
+    best, dataset_name, df_genes = extract_best_model_gene_corrs(run, runs_root=runs_root, verbose=False)
+    encoder_name = best.get("encoder_name", "Unknown")
+
+    # 2) Splits (+ optional HEST directory metadata inside get_test_splits)
+    df_splits = get_test_splits(run, runs_root=runs_root, splits_root=splits_root, extra_metadata_csv=extra_metadata_csv)
+
+    # 3) Long per-split df
+    df_long = merge_kfold_gene_corrs_with_test_metadata(df_genes, df_splits)
+
+    # 4) Curated annotations (optional; needed for gene-level grouping by panel/cell_type/condition)
+    curated_ok = isinstance(curated_xlsx, str) and Path(curated_xlsx).exists()
+    if curated_ok:
+        df_genes_annot = annotate_genes_with_curated(df_genes, curated_xlsx)
+        df_long_annot  = annotate_genes_with_curated(df_long,  curated_xlsx)
+    else:
+        df_genes_annot = df_genes
+        df_long_annot  = df_long
+
+    arts: Dict[str, Path] = {}
+
+    # ---------------- Base plots (always) ----------------
+    fig = compare_models(run, runs_root=runs_root, show=show)
+    if fig is not None:
+        p = (Path(runs_root) / run / "plots" / "model_comparison.png")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(p, dpi=200, bbox_inches="tight")
+        if show:
+            display(fig)
+        plt.close(fig)
+        arts["model_comparison"] = p
+
+    # Gene barplot (ungrouped)
+    fig = plot_gene_correlation_barplot(df_genes, dataset_name, encoder_name)
+    p = outdir / "gene_barplot.png"
+    fig.savefig(p, dpi=200, bbox_inches="tight")
+    if show: display(fig)
+    plt.close(fig)
+    arts["gene_barplot"] = p
+
+    # Histogram
+    fig = plot_gene_correlation_histogram(df_genes, dataset_name, encoder_name)
+    p = outdir / "gene_hist.png"
+    fig.savefig(p, dpi=200, bbox_inches="tight")
+    if show: display(fig)
+    plt.close(fig)
+    arts["gene_hist"] = p
+
+    # Per-sample (no grouping)
+    fig = plot_corrs_by_sample(df_long, dataset_name, encoder_name, group_by=None)
+    p = outdir / "per_sample.png"
+    fig.savefig(p, dpi=200, bbox_inches="tight")
+    if show: display(fig)
+    plt.close(fig)
+    arts["per_sample"] = p
+
+    # ---------------- Gene-level grouped barplots (only what user requested) ----------------
+    # normalize group_by to a list
+    requested_groups: List[str] = []
+    if group_by is not None:
+        requested_groups = [group_by] if isinstance(group_by, str) else list(group_by)
+
+    # Your grouped gene barplot supports: panel / cell_type / condition
+    valid_gene_groups = {"panel", "cell_type", "condition",'tcr','coeliac'}
+
+    for gb in requested_groups:
+        print('plot individual genes for group',gb)
+        if gb not in valid_gene_groups:
+            # skip silently if user asked for something not supported by this function
+            print("requested group " ,gb, "is not supported")
+            continue
+        # only plot if curated annotations are available and column is present with non-NA values
+        if curated_ok and (gb in df_genes_annot.columns) and df_genes_annot[gb].notna().any():
+            display(df_genes_annot[gb])
+            fig = plot_gene_correlation_barplot_grouped(
+                df_genes_annot,           # ← your function signature
+                group_by=gb,              # pass the requested group
+                show_mean=True
+            )
+            p = outdir / f"gene_barplot_by_{gb}.png"
+            fig.savefig(p, dpi=200, bbox_inches="tight")
+            if show: display(fig)
+            plt.close(fig)
+            arts[f"gene_barplot_by_{gb}"] = p
+        # if not curated / or column empty → skip
+
+    # ---------------- Per-sample grouped (optional, if user also wants these) ----------------
+    # If you also want to produce per-sample grouped plots based on the same `group_by` items:
+    for gb in requested_groups:
+        # pick annotated long df if it has the column; else fall back to df_long
+        if gb in df_long_annot.columns and df_long_annot[gb].notna().any():
+            dplot = df_long_annot
+        elif gb in df_long.columns and df_long[gb].notna().any():
+            dplot = df_long
+        else:
+            continue
+
+        print('plot sample-level group by')
+
+        fig = plot_corrs_by_sample(dplot, dataset_name, encoder_name, group_by=gb)
+        p = outdir / f"per_sample_by_{gb}.png"
+        fig.savefig(p, dpi=200, bbox_inches="tight")
+        if show: display(fig)
+        plt.close(fig)
+        arts[f"per_sample_by_{gb}"] = p
+
+    return arts
+
+from typing import Union, List, Optional, Dict
+from pathlib import Path
+import matplotlib.pyplot as plt
+
+def generate_all_plots(
+    run: str,
+    group_by: Union[str, List[str], None] = None,
+    runs_root: str = DEFAULT_RUNS_ROOT,
+    splits_root: str = DEFAULT_SPLITS_ROOT,
+    curated_xlsx: Optional[str] = DEFAULT_CURATED_XLSX,
+    extra_metadata_csv: Optional[str] = DEFAULT_EXTRA_METADATA,
+    top_n: int = 30,
+    show: bool = False,
+) -> Dict[str, Path]:
+    """
+    New workflow:
+      - Always produce base plots (gene_barplot, gene_hist, per_sample).
+      - If `group_by` is provided (str or list[str]), produce only those grouped plots
+        *when the needed metadata/columns exist*.
+      - Save individual PNGs into <runs_root>/<run>/plots and also write a combined
+        multi-page PDF named plots.pdf containing all PNGs found in that folder.
+
+    Returns:
+        arts: mapping of plot_name -> Path
     """
     # Paths
     run_dir = Path(runs_root) / run
@@ -1207,12 +1621,39 @@ def generate_all_plots(
         else:
             continue
 
+        print('plot sample-level group by')
+
         fig = plot_corrs_by_sample(dplot, dataset_name, encoder_name, group_by=gb)
         p = outdir / f"per_sample_by_{gb}.png"
         fig.savefig(p, dpi=200, bbox_inches="tight")
         if show: display(fig)
         plt.close(fig)
         arts[f"per_sample_by_{gb}"] = p
+
+    # ---------------- Combine all PNGs into a single PDF called plots.pdf ----------------
+    try:
+        from PIL import Image
+        png_files = sorted(outdir.glob("*.png"))
+        if len(png_files) > 0:
+            # open images and convert to RGB as needed
+            pil_images = []
+            for idx, png in enumerate(png_files):
+                img = Image.open(png)
+                # convert RGBA -> RGB to avoid transparency issues in PDF
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    img = img.convert("RGB")
+                else:
+                    img = img.convert("RGB")
+                pil_images.append(img)
+
+            pdf_path = outdir / "plots.pdf"
+            # save first image and append the rest as additional pages
+            first_img, rest = pil_images[0], pil_images[1:]
+            first_img.save(pdf_path, "PDF", resolution=200.0, save_all=True, append_images=rest)
+            arts["plots_pdf"] = pdf_path
+    except Exception as e:
+        # non-fatal: if PIL missing or something goes wrong, continue but record no PDF
+        print(f"[warning] Failed to create combined PDF: {e}")
 
     return arts
 
@@ -1299,3 +1740,48 @@ def compare_runs_and_plot(run_a, label_a, run_b, label_b):
     plt.show()
 
     return common, wide
+
+
+
+def detect_patch_col_from_name(name: str) -> str:
+    """Detect resolution from a run/dataset name and return a candidate col like 'num_patches_50um'."""
+
+    import re
+    # Normalize to lowercase
+    s = (name or "").lower()
+
+    # priority: 25um, 50um, 100um
+    if re.search(r"25(\W|_|um|$)", s):
+        res = 25
+    elif re.search(r"50(\W|_|um|$)", s):
+        res = 50
+    else:
+        # default 100um when no explicit mention
+        res = 100
+    return f"num_patches_{res}um"
+
+def choose_existing_patch_col(candidate: str, meta_cols: list) -> str:
+    """Return candidate if present in meta_cols; otherwise try other common names then fallback."""
+    if candidate in meta_cols:
+        return candidate
+
+    # try alternative common suffix patterns
+    alternatives = []
+    # e.g. user might have used 'num_patches_50' or 'num_patches_50_um' etc.
+    m = re.match(r"num_patches_(\d+)(um)?", candidate)
+    if m:
+        n = m.group(1)
+        alternatives.extend([
+            f"num_patches_{n}",
+            f"num_patches_{n}_um",
+            f"num_patches_{n}um",  # candidate itself
+        ])
+    # also try typical defaults
+    alternatives.extend(["num_patches_100um", "num_patches_50um", "num_patches_25um", "num_patches"])
+
+    for alt in alternatives:
+        if alt in meta_cols:
+            return alt
+
+    # final fallback (keep the original candidate even if absent; generate_all_plots should handle missing values)
+    return candidate

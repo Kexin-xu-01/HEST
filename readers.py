@@ -939,9 +939,20 @@ class XeniumReader(Reader):
         
         shapes = []
 
-
         alignment_matrix = read_xenium_alignment(alignment_file_path) if alignment_file_path else None
+
+        # fallback to identity 3x3 if alignment is missing
+        if alignment_matrix is None:
+            # 3x3 homogeneous identity transform so matmul works as expected
+            print('alignment file missing. Using identity matrix as alignment matrix. Remember to align image later')
+            alignment_matrix = np.eye(3, dtype=float)
+
         dict['pixel_size_um_estimated'] = self.__xenium_estimate_pixel_size(pixel_size_morph, alignment_matrix)
+
+        # original
+        #alignment_matrix = read_xenium_alignment(alignment_file_path) if alignment_file_path else None
+        #dict['pixel_size_um_estimated'] = self.__xenium_estimate_pixel_size(pixel_size_morph, alignment_matrix)
+
         if cell_bound_path is not None:
             shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph}))
             if alignment_matrix is not None:

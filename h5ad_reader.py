@@ -14,8 +14,8 @@ import dask
 dask.config.set({'dataframe.query-planning': False})
 from pathlib import Path
 
-import cucim
-from cucim import CuImage
+#import cucim
+#from cucim import CuImage
 
 from hest.utils import read_xenium_alignment, align_xenium_df  
 
@@ -151,17 +151,22 @@ def standardize_obs_columns(
 
 def update_st_with_filtered_and_labelled(
     st,
-    adata_labelled: sc.AnnData,
+    adata_labelled: Optional[sc.AnnData] = None,
     drop_codeword: bool = True,
 ) -> None:
-    """Filter st.adata to its WSI extent, optionally drop 'Codeword' features, then attach labelled cells."""
+    """Filter st.adata to its WSI extent, optionally drop 'Codeword' features, 
+    then attach labelled cells if provided."""
     W = st.wsi.width
     H = st.wsi.height
+
     adata_piece = subset_adata_to_wsi(st.adata, W, H)
     if drop_codeword:
         adata_piece = remove_codeword_features(adata_piece)
+
     st.adata = adata_piece
-    st.cell_adata = adata_labelled
+
+    if adata_labelled is not None:
+        st.cell_adata = adata_labelled
 
 
 def refresh_meta_counts(st) -> Dict[str, float]:

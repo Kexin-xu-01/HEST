@@ -33,7 +33,6 @@ def load_hest_sample(sample_dir: Path):
     # files
     adata_path = sample_dir / "aligned_adata.h5ad"
     image_path = sample_dir / "aligned_fullres_HE.tif"
-    cells_path = sample_dir / "aligned_cells.h5ad"
     metrics_path = sample_dir / "metrics.json"
     
     # Look for any .geojson under tissue_seg
@@ -45,8 +44,6 @@ def load_hest_sample(sample_dir: Path):
         raise FileNotFoundError(f"Missing {adata_path}")
     if not image_path.exists():
         raise FileNotFoundError(f"Missing {image_path}")
-    if not cells_path.exists():
-        raise FileNotFoundError(f"Missing {cells_path}")
 
     # load AnnData
     adata = sc.read_h5ad(adata_path)
@@ -57,7 +54,6 @@ def load_hest_sample(sample_dir: Path):
         img=str(image_path),
         metrics_path=str(metrics_path),
         #tissue_contours_path = str(tissue_contours_path)
-        # xenium_cell_path=str(cells_path) # no need
     )
     
     print(st)
@@ -65,7 +61,7 @@ def load_hest_sample(sample_dir: Path):
     return st
 
 
-def segment_hest_tissue(hest_root: Path, ids=None, method="deep"):
+def segment_hest_tissue(hest_root: Path, ids=None, method="deep",target_pxl_size=1):
     """
     Perform tissue segmentation on HEST Xenium samples inside hest/xenium_data/broad,
     saving results into a tissue_seg folder inside each sample folder.
@@ -104,7 +100,7 @@ def segment_hest_tissue(hest_root: Path, ids=None, method="deep"):
                     category=UserWarning,
                 )
 
-                st.segment_tissue(method=method)
+                st.segment_tissue(method=method,target_pxl_size=target_pxl_size)
                 st.save_tissue_contours(tissue_dir, sample_id)
                 st.save_tissue_vis(tissue_dir, sample_id)
 

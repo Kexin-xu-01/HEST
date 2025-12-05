@@ -70,9 +70,9 @@ def train_test_reg(X_train, X_test, y_train, y_test,
         # compute r2 score
         r2_score = float(1 - np.sum((target_vals - preds)**2) / np.sum((target_vals - np.mean(target_vals))**2))
         pearson_corr, _ = pearsonr(target_vals, preds)
-        if np.isnan(pearson_corr):
-            print(target_vals)
-            print(preds)
+        #if np.isnan(pearson_corr):
+            #print(target_vals)
+            #print(preds)
         errors.append(l2_error)
         r2_scores.append(r2_score)
         pearson_corrs.append(pearson_corr)

@@ -9,7 +9,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import portrait
 import fnmatch
 import os
-import io
+import io  
 
 
 def make_spatial_plot_per_run(
@@ -33,6 +33,7 @@ def make_spatial_plot_per_run(
         spatial_plots.pdf inside each dataset folder.
     """
     base_root = Path(base_root)
+    print('test')
 
     for ds in datasets:
         ds_dir = base_root / ds

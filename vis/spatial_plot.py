@@ -33,7 +33,6 @@ def make_spatial_plot_per_run(
         spatial_plots.pdf inside each dataset folder.
     """
     base_root = Path(base_root)
-    print('test')
 
     for ds in datasets:
         ds_dir = base_root / ds

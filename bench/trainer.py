@@ -20,6 +20,7 @@ def train_test_reg(X_train, X_test, y_train, y_test,
         reg.fit(X_train, y_train)
         
         preds_all = reg.predict(X_test)
+        
     elif method == 'random-forest':
         from cuml.ensemble import RandomForestRegressor
     

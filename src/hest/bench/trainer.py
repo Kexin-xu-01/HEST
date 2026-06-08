@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.stats import pearsonr
-from sklearn.linear_model import Ridge
 from tqdm import tqdm
 
 
@@ -9,6 +8,7 @@ def train_test_reg(X_train, X_test, y_train, y_test,
     
     
     if method == 'ridge':
+        from sklearn.linear_model import Ridge
         alpha = 100 / (X_train.shape[1] * y_train.shape[1])
 
         print(f"Using alpha: {alpha}")
@@ -20,6 +20,27 @@ def train_test_reg(X_train, X_test, y_train, y_test,
         reg.fit(X_train, y_train)
         
         preds_all = reg.predict(X_test)
+    elif method == 'ridge-gpu':
+        from cuml.linear_model import Ridge
+        
+        alpha = 100 / (X_train.shape[1] * y_train.shape[1])
+        
+        print('using ridge-gpu method')
+        print(f"Using alpha: {alpha}")
+        
+        # No need for a random_state here
+        # svd solver is already deterministic
+        reg = Ridge(
+            solver='svd',
+            alpha=alpha,
+            fit_intercept=False, 
+        )
+        reg.fit(
+            X_train.numpy(), 
+            y_train
+        )
+        preds_all = reg.predict(X_test.numpy())
+        
     elif method == 'random-forest':
         from cuml.ensemble import RandomForestRegressor
     
@@ -70,6 +91,7 @@ def train_test_reg(X_train, X_test, y_train, y_test,
         # compute r2 score
         r2_score = float(1 - np.sum((target_vals - preds)**2) / np.sum((target_vals - np.mean(target_vals))**2))
         pearson_corr, _ = pearsonr(target_vals, preds)
+        pearson_corr = float(pearson_corr)
         if np.isnan(pearson_corr):
             print(target_vals)
             print(preds)

@@ -11,7 +11,7 @@ Welcome to the official GitHub repository of the HEST-Library introduced in *"HE
 <br/>
 
 ### What does this repository provide?
-- **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,229 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
+- **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,276 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
 - **HEST-Library:** A series of helpers to assemble new ST samples (ST, Visium, Visium HD, Xenium) and work with HEST-1k (ST analysis, batch effect viz and correction, etc.)
 - **HEST-Benchmark:** A new benchmark to assess the predictive performance of foundation models for histology in predicting gene expression from morphology 
 
@@ -20,6 +20,10 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 <br/>
 
 ## Updates
+
+- **8.02.26**: 18 new Xenium (including Xenium 5k) samples added to HEST (v1.3.0)!
+
+- **6.01.26**: 27 new high-quality Visium HD samples added to HEST (v1.2.0)!
 
 - **21.10.24**: HEST has been accepted to NeurIPS 2024 as a Spotlight! We will be in Vancouver from Dec 10th to 15th. Send us a message if you wanna learn more about HEST (gjaume@bwh.harvard.edu). 
 
@@ -33,7 +37,7 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 
 To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
 
-**NOTE:** The entire dataset weighs more than 1TB but you can easily download a subset by querying per id, organ, species...
+**NOTE:** The entire dataset weighs more than 2TB but you can easily download a subset by querying per id, organ, species...
 
 
 ## HEST-Library installation
@@ -41,9 +45,15 @@ To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](htt
 ```
 git clone https://github.com/mahmoodlab/HEST.git
 cd HEST
-conda create -n "hest" python=3.9
+conda create -n "hest" python=3.11
 conda activate hest
 pip install -e .
+```
+
+#### Additional dependencies (HEST-Benchmark):
+To run HEST-Benchmark and load patch encoder models, install benchmark extras:
+```
+pip install -e ".[benchmark]"
 ```
 
 #### Additional dependencies (for WSI manipulation):
@@ -87,27 +97,41 @@ In addition, we provide complete [documentation](https://hest.readthedocs.io/en/
 
 The HEST-Benchmark was designed to assess 11 foundation models for pathology under a new, diverse, and challenging benchmark. HEST-Benchmark includes nine tasks for gene expression prediction (50 highly variable genes) from morphology (112 x 112 um regions at 0.5 um/px) in nine different organs and eight cancer types. We provide a step-by-step tutorial to run HEST-Benchmark and reproduce our results in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb).
 
-### HEST-Benchmark results (08.30.24)
+### HEST-Benchmark results (03.04.26)
 
-HEST-Benchmark was used to assess 11 publicly available models.
-Reported results are based on a Ridge Regression with PCA (256 factors). Ridge regression unfairly penalizes models with larger embedding dimensions. To ensure fair and objective comparison between models, we opted for PCA-reduction. 
-Model performance measured with Pearson correlation. Best is **bold**, second best
-is _underlined_. Additional results based on Random Forest and XGBoost regression are provided in the paper. 
+HEST-Benchmark was used to assess 25 publicly available models.
+Reported results are based on Ridge Regression with PCA (256 factors). Ridge regression can penalize models with larger embedding dimensions; PCA-reduction is used for fairer comparison.
+Model performance is measured with Pearson correlation.
 
-| Model                  | IDC    | PRAD   | PAAD   | SKCM   | COAD   | READ   | ccRCC  | LUAD   | LYMPH IDC | Average |
-|------------------------|--------|--------|--------|--------|--------|--------|--------|--------|-----------|---------|
-| **[Resnet50](https://arxiv.org/abs/1512.03385)**      | 0.4741 | 0.3075 | 0.3889 | 0.4822 | 0.2528 | 0.0812 | 0.2231 | 0.4917 | 0.2322    | 0.326   |
-| **[CTransPath](https://www.sciencedirect.com/science/article/abs/pii/S1361841522002043)**         | 0.511  | 0.3427 | 0.4378 | 0.5106 | 0.2285 | 0.11   | 0.2279 | 0.4985 | 0.2353    | 0.3447  |
-| **[Phikon](https://huggingface.co/owkin/phikon)**            | 0.5327 | 0.342  | 0.4432 | 0.5355 | 0.2585 | 0.1517 | 0.2423 | 0.5468 | 0.2373    | 0.3656  |
-| **[CONCH](https://huggingface.co/MahmoodLab/CONCH)**             | 0.5363 | 0.3548 | 0.4475 | 0.5791 | 0.2533 | 0.1674 | 0.2179 | 0.5312 | 0.2507    | 0.3709  |
-| **[Remedis](https://arxiv.org/abs/2205.09723)**            | 0.529  | 0.3471 | 0.4644 | 0.5818 | 0.2856 | 0.1145 | 0.2647 | 0.5336 | 0.2473    | 0.3742  |
-| **[Gigapath](https://huggingface.co/prov-gigapath/prov-gigapath)**          | 0.5508 | _0.3708_ | 0.4768 | 0.5538 | _0.301_ | 0.186 | 0.2391 | 0.5399 | 0.2493    | 0.3853  |
-| **[UNI](https://huggingface.co/MahmoodLab/UNI)**                | 0.5702 | 0.314  | 0.4764 | 0.6254 | 0.263  | 0.1762 | 0.2427 | 0.5511 | 0.2565    | 0.3862  |
-| **[H0-mini](https://huggingface.co/bioptimus/H0-mini)** | 0.5862 | 0.3684 | _0.4919_ | 0.6011 | 0.2494 | 0.1863 | _0.2670_ | 0.5481 | **0.2629** | 0.3957 |
-| **[Virchow](https://huggingface.co/paige-ai/Virchow)**            | 0.5702 | 0.3309 | 0.4875 | 0.6088 | **0.311** | 0.2019 | 0.2637 | 0.5459 | 0.2594    | 0.3977  |
-| **[Virchow2](https://huggingface.co/paige-ai/Virchow2)**           | 0.5922 | 0.3465 | 0.4661 | 0.6174 | 0.2578 | 0.2084 | **0.2788** | **0.5605** | 0.2582    | 0.3984  |
-| **UNIv1.5**            | **0.5989** | 0.3645 | 0.4902 | _0.6401_ | 0.2925 | _0.2240_ | 0.2522 | _0.5586_ | _0.2597_ | _0.4090_ |
-| **[Hoptimus0](https://github.com/bioptimus/releases/blob/main/models/h-optimus/v0/LICENSE.md)**        | _0.5982_ | **0.385** | **0.4932** | **0.6432** | 0.2991 | **0.2292** | 0.2654 | 0.5582 | 0.2595 | **0.4146** |
+| Model | Average | IDC | PRAD | PAAD | SKCM | COAD | READ | CCRCC | LUNG | LYMPH_IDC |
+|---|---|---|---|---|---|---|---|---|---|---|
+| [H-Optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | 0.4229 | 0.6024 | 0.3781 | 0.4964 | 0.6589 | 0.3195 | 0.2421 | 0.2533 | 0.5779 | 0.2774 |
+| [GenBio-PathFM](https://huggingface.co/genbio-ai/genbio-pathfm) | 0.4197 | 0.5872 | 0.3913 | 0.4959 | 0.6715 | 0.3284 | 0.1785 | 0.2615 | 0.5787 | 0.2842 |
+| [H-Optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | 0.4150 | 0.5976 | 0.3848 | 0.4911 | 0.6454 | 0.3086 | 0.2216 | 0.2676 | 0.5590 | 0.2591 |
+| [UNI2-h](https://huggingface.co/MahmoodLab/UNI2-h) | 0.4141 | 0.5898 | 0.3569 | 0.5001 | 0.6606 | 0.3015 | 0.2223 | 0.2640 | 0.5587 | 0.2727 |
+| [Virchow](https://huggingface.co/paige-ai/Virchow) | 0.4061 | 0.5846 | 0.3378 | 0.5159 | 0.6243 | 0.3079 | 0.1981 | 0.2586 | 0.5664 | 0.2610 |
+| [Virchow2](https://huggingface.co/paige-ai/Virchow2) | 0.4034 | 0.5971 | 0.3529 | 0.4779 | 0.6402 | 0.2581 | 0.2074 | 0.2719 | 0.5685 | 0.2568 |
+| [Midnight-12k](https://huggingface.co/kaiko-ai/midnight) | 0.3952 | 0.5823 | 0.3370 | 0.4900 | 0.6360 | 0.2908 | 0.1856 | 0.2132 | 0.5577 | 0.2642 |
+| [H0-mini](https://huggingface.co/bioptimus/H0-mini) | 0.3958 | 0.5862 | 0.3687 | 0.4919 | 0.6012 | 0.2494 | 0.1863 | 0.2670 | 0.5482 | 0.2629 |
+| [OpenMidnight](https://huggingface.co/SophontAI/OpenMidnight) | 0.3912 | 0.5870 | 0.3590 | 0.4731 | 0.5941 | 0.2728 | 0.1762 | 0.2458 | 0.5534 | 0.2598 |
+| [Hibou-L](https://huggingface.co/histai/hibou-L) | 0.3881 | 0.5701 | 0.2945 | 0.4674 | 0.5817 | 0.3040 | 0.1902 | 0.2657 | 0.5762 | 0.2432 |
+| [GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | 0.3875 | 0.5515 | 0.3699 | 0.4746 | 0.5619 | 0.2992 | 0.1961 | 0.2430 | 0.5412 | 0.2500 |
+| [UNI](https://huggingface.co/MahmoodLab/UNI) | 0.3873 | 0.5890 | 0.2943 | 0.4807 | 0.6346 | 0.2614 | 0.1836 | 0.2400 | 0.5464 | 0.2559 |
+| [CONCH v1.5](https://huggingface.co/MahmoodLab/conchv1_5) | 0.3792 | 0.5440 | 0.3808 | 0.4570 | 0.5517 | 0.2802 | 0.1600 | 0.2176 | 0.5513 | 0.2699 |
+| [GPFM](https://huggingface.co/majiabo/GPFM) | 0.3793 | 0.5660 | 0.3423 | 0.4601 | 0.5891 | 0.2480 | 0.1646 | 0.2591 | 0.5472 | 0.2371 |
+| [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | 0.3747 | 0.5408 | 0.3545 | 0.4455 | 0.5554 | 0.2500 | 0.1749 | 0.2659 | 0.5419 | 0.2437 |
+| [Kaiko ViT-B/8](https://huggingface.co/1aurent/vit_base_patch8_224.kaiko_ai_towards_large_pathology_fms) | 0.3735 | 0.5599 | 0.3611 | 0.4601 | 0.5725 | 0.2683 | 0.1623 | 0.2313 | 0.5183 | 0.2273 |
+| [CONCH v1](https://huggingface.co/MahmoodLab/conch) | 0.3696 | 0.5363 | 0.3548 | 0.4468 | 0.5787 | 0.2489 | 0.1602 | 0.2180 | 0.5322 | 0.2507 |
+| [Lunit ViT-S/8](https://huggingface.co/1aurent/vit_small_patch8_224.lunit_dino) | 0.3678 | 0.5449 | 0.2829 | 0.4267 | 0.5738 | 0.2826 | 0.1610 | 0.2463 | 0.5415 | 0.2506 |
+| [Phikon](https://huggingface.co/owkin/phikon) | 0.3660 | 0.5327 | 0.3420 | 0.4425 | 0.5355 | 0.2623 | 0.1532 | 0.2423 | 0.5466 | 0.2373 |
+| [Kaiko ViT-B/16](https://huggingface.co/1aurent/vit_base_patch16_224.kaiko_ai_towards_large_pathology_fms) | 0.3645 | 0.5352 | 0.3275 | 0.4524 | 0.5502 | 0.2812 | 0.1525 | 0.2291 | 0.5156 | 0.2365 |
+| [Kaiko ViT-L/14](https://huggingface.co/1aurent/vit_large_patch14_reg4_dinov2.kaiko_ai_towards_large_pathology_fms) | 0.3641 | 0.5535 | 0.3470 | 0.4372 | 0.5533 | 0.2535 | 0.1472 | 0.2194 | 0.5379 | 0.2283 |
+| [Kaiko ViT-S/8](https://huggingface.co/1aurent/vit_small_patch8_224.kaiko_ai_towards_large_pathology_fms) | 0.3512 | 0.5304 | 0.3340 | 0.4181 | 0.5174 | 0.2281 | 0.1469 | 0.2346 | 0.5053 | 0.2463 |
+| [Kaiko ViT-S/16](https://huggingface.co/1aurent/vit_small_patch16_224.kaiko_ai_towards_large_pathology_fms) | 0.3493 | 0.5333 | 0.3483 | 0.4409 | 0.5449 | 0.2057 | 0.1328 | 0.2099 | 0.5030 | 0.2249 |
+| [CTransPath](https://huggingface.co/datasets/MahmoodLab/hest-bench/tree/main/fm_v1/ctranspath) | 0.3468 | 0.4993 | 0.3551 | 0.4314 | 0.5097 | 0.2382 | 0.0968 | 0.2362 | 0.5137 | 0.2409 |
+| [MUSK](https://huggingface.co/xiangjx/musk) | 0.3467 | 0.5248 | 0.3430 | 0.4277 | 0.5233 | 0.2365 | 0.1110 | 0.1825 | 0.5171 | 0.2545 |
+| [ResNet50](https://huggingface.co/timm/resnet50.tv_in1k) | 0.3252 | 0.4739 | 0.3044 | 0.3880 | 0.4821 | 0.2500 | 0.0783 | 0.2252 | 0.4949 | 0.2305 |
+
 
 
 ### Benchmarking your own model
@@ -118,7 +142,7 @@ Our tutorial in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/H
 
 ## Issues 
 - The preferred mode of communication is via GitHub issues.
-- If GitHub issues are inappropriate, email `gjaume@bwh.harvard.edu` (and cc `homedoucetpaul@gmail.com`). 
+- If GitHub issues are inappropriate, email `guillaume.jaume@unil.ch` (and cc `homedoucetpaul@gmail.com`). 
 - Immediate response to minor issues may not be available.
 
 ## Citation

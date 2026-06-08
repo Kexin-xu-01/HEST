@@ -1,12 +1,27 @@
-# Installing `hest`
+# Installation
 
 Simply clone and install the package as follows:
 ```
 git clone https://github.com/mahmoodlab/HEST.git
 cd HEST
-conda create -n "hest" python=3.9
+conda create -n "hest" python=3.11
 conda activate hest
 pip install -e .
+```
+
+## Optional: HEST-Benchmark dependencies
+
+To run HEST-Benchmark (including TRIDENT patch encoders), install benchmark extras:
+
+```
+pip install -e ".[benchmark]"
+```
+
+Many benchmark encoders are hosted on Hugging Face and may be gated.
+Request access where needed and authenticate in your environment:
+
+```
+huggingface-cli login
 ```
 
 ## Additional dependencies (for WSI manipulation):

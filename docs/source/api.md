@@ -3,6 +3,8 @@
 
 ## Interact with HEST-1k
 
+See tutorial `2. Interacting with HEST`.
+
 ```{eval-rst}
 .. module:: hest
 ```
@@ -18,6 +20,8 @@
 
 ## Run HEST-Benchmark
 
+See tutorial `4. Running HEST Benchmark`.
+
 ```{eval-rst}
 .. module:: hest.bench
 
@@ -28,6 +32,8 @@
 ```
 
 ## HESTData class
+
+Core object representing a (pooled) Spatial Transcriptomics sample along with a full resolution H&E image and associated metadata. See tutorial `2. Interacting with HEST`.
 
 ```{eval-rst}
 .. module:: hest
@@ -54,6 +60,67 @@ Methods used to pool Xenium transcripts and Visium-HD bins into square bins of c
    
     pool_transcripts_xenium
     pool_bins_visiumhd
+    pool_bins_visiumhd_per_cell
+```
+
+## CellViT segmentation
+Simplified API for nuclei segmentation
+
+
+```{eval-rst}
+.. currentmodule:: hest.segmentation.cell_segmenters
+
+.. autosummary::
+    :toctree: generated
+
+    segment_cellvit
+```
+
+
+## Gene names manipulation
+
+```{eval-rst}
+.. currentmodule:: hest.HESTData
+
+.. autosummary::
+    :toctree: generated
+
+    unify_gene_names
+    ensembl_id_to_gene
+```
+
+
+## Readers to expand HEST-1k
+
+Readers to expand HEST-1k with additional samples. See tutorial `3. Assembling HEST Data`.
+
+```{eval-rst}
+.. currentmodule:: hest.readers
+
+.. autosummary::
+    :toctree: generated
+
+    Reader
+    VisiumReader
+    XeniumReader
+    VisiumHDReader
+    STReader
+```
+
+## IO
+
+```{eval-rst}
+.. currentmodule:: hest.io.seg_readers
+
+.. autosummary::
+    :toctree: generated
+
+    GDFReader
+    XeniumParquetCellReader
+    GDFParquetCellReader
+    XeniumTranscriptsReader
+    HESTXeniumTranscriptsReader
+    write_geojson
 ```
 
 ## Batch effect visualization/correction
@@ -74,50 +141,6 @@ Methods used to pool Xenium transcripts and Visium-HD bins into square bins of c
     correct_batch_effect
 ```
 
-## Gene names manipulation
-
-```{eval-rst}
-.. currentmodule:: hest.HESTData
-
-.. autosummary::
-    :toctree: generated
-
-    unify_gene_names
-    ensembl_id_to_gene
-```
-
-
-## Readers to expand HEST-1k
-
-Readers to expand HEST-1k with additional samples.
-
-```{eval-rst}
-.. currentmodule:: hest.readers
-
-.. autosummary::
-    :toctree: generated
-
-    Reader
-    VisiumReader
-    XeniumReader
-    VisiumHDReader
-    STReader
-```
-
-
-## CellViT segmentation
-Simplified API for nuclei segmentation
-
-
-```{eval-rst}
-.. currentmodule:: hest.segmentation.cell_segmenters
-
-.. autosummary::
-    :toctree: generated
-
-    segment_cellvit
-```
-
 
 ## Miscellaneous
 
@@ -131,4 +154,5 @@ Simplified API for nuclei segmentation
     autoalign_visium
     write_10X_h5
     find_pixel_size_from_spot_coords
+    get_k_genes
 ```

@@ -4,27 +4,29 @@ import json
 import math
 import os
 import shutil
-from typing import Union
+from typing import Optional, Tuple, Union
+import warnings
 import zipfile
 from abc import abstractmethod
 
 import numpy as np
 import pandas as pd
-from hestcore.segmentation import get_path_relative
+from hest.path_utils import get_path_relative
 from loguru import logger
+from tqdm import tqdm
 
 from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData,
                            VisiumHESTData, XeniumHESTData)
-from hestcore.wsi import wsi_factory
+from hest.trident_compat import wsi_factory, wsi_to_numpy
 from hest.io.seg_readers import XeniumParquetCellReader, read_gdf
 from hest.LazyShapes import LazyShapes
-from hest.segmentation.cell_segmenters import segment_cellvit
+from hest.segmentation.cell_segmenters import assign_spot_to_cell, expand_nuclei, read_adata, read_seg, read_spots_gdf, segment_cellvit, sum_per_cell
 from hest.utils import (SpotPacking, align_xenium_df, check_arg,
                         find_biggest_img,
                         find_first_file_endswith,
-                        find_pixel_size_from_spot_coords,
+                        find_pixel_size_from_spot_coords, get_col_selection,
                         get_path_from_meta_row, helper_mex, load_wsi,
-                        metric_file_do_dict, read_xenium_alignment,
+                        metric_file_do_dict, read_parquet_dask, read_xenium_alignment,
                         register_downscale_img, verify_paths)
 
 LOCAL = False
@@ -81,6 +83,11 @@ def read_visium_positions_old(tissue_position_list_path):
     
     return tissue_positions
 
+def get_pixel_size_from_hd_scalefactors(scalefactors_path) -> Optional[float]:
+    with open(scalefactors_path) as f:
+        d = dict(json.load(f))
+        return d.get('microns_per_pixel')
+
 
 class VisiumHDReader(Reader):
     """10x Genomics Visium-HD reader"""
@@ -92,15 +99,12 @@ class VisiumHDReader(Reader):
         if square_16um_path is None:
             square_16um_path = find_first_file_endswith(os.path.join(path, 'binned_outputs'), 'square_016um')
             
-        square_2um_path = find_first_file_endswith(path, 'square_002um', anywhere=True)
-        
         metrics_path = find_first_file_endswith(path, 'metrics_summary.csv')
         
         st_object = self.read(
             img_path=os.path.join(path, img_filename),
             square_16um_path=square_16um_path,
             metrics_path=metrics_path,
-            square_2um_path=square_2um_path,
             **read_kwargs
         )
         
@@ -111,13 +115,35 @@ class VisiumHDReader(Reader):
         self, 
         img_path: str, 
         square_16um_path: str, 
+        square_2um_path: str,
         metrics_path: str = None,
-        square_2um_path: str = None,
-        use_dask = False
+        dst_bin_size_um: int = 128,
+        chunk_len = 50000,
     ) -> VisiumHDHESTData:
+        """ Read a VisiumHD sample such that 16um bins are pooled into 128um pseudo-Visium bins
+
+        Args:
+            img_path (str): path to the WSI
+            square_16um_path (str): path to a square_016um/ Visium HD folder.
+            square_2um_path (str): **Deprecated** path to a square_002um/ Visium HD folder.
+            metrics_path (str, optional): path to a metrics_summary.csv Visium HD file.
+            dst_bin_size_um (int, optional): 16um spots will be pooled to spots of this size (must be a multiple of the spot size: 16)
+            chunk_len (str, optional): chunk length while pooling transcripts, a higher number will consume more RAM but might be faster.
+
+        Returns:
+            VisiumHDHESTData: Visium HD sample
+        """
         import scanpy as sc
+        SPOT_SIZE = 16
+
+        warnings.warn(
+            "square_2um_path is deprecated and will be removed in a future version. ",
+            DeprecationWarning,
+            stacklevel=2
+        )
         
-        self.square_2um_path = square_2um_path
+        if dst_bin_size_um % SPOT_SIZE != 0:
+            raise ValueError(f"dst_bin_size_um must be a multiple of the spot size ({SPOT_SIZE})")
         
         print("Loading the WSI... (can be slow for large images)")
         img, pixel_size_embedded = load_wsi(img_path)
@@ -125,6 +151,7 @@ class VisiumHDReader(Reader):
         spatial_path = find_first_file_endswith(square_16um_path, 'spatial')
         tissue_positions_path = find_first_file_endswith(spatial_path, 'tissue_positions.parquet')
         filtered_bc_matrix_path = find_first_file_endswith(square_16um_path, 'filtered_feature_bc_matrix.h5')
+        scalefactors_path = find_first_file_endswith(spatial_path, 'scalefactors_json.json')
         
         tissue_positions = pd.read_parquet(tissue_positions_path)
         tissue_positions.index = tissue_positions['barcode']
@@ -140,18 +167,18 @@ class VisiumHDReader(Reader):
         meta = {}
         if metrics_path is not None:
             meta = metric_file_do_dict(metrics_path) 
-            
-            
-        pixel_size, _ = find_pixel_size_from_spot_coords(adata.obs, inter_spot_dist=16, packing=SpotPacking.GRID_PACKING)
+        
+        pixel_size = get_pixel_size_from_hd_scalefactors(scalefactors_path)
+        if pixel_size is None:
+            pixel_size, _ = find_pixel_size_from_spot_coords(adata.obs, inter_spot_dist=SPOT_SIZE, packing=SpotPacking.GRID_PACKING)
 
-
-        pooled_adata = pool_bins_visiumhd(adata, pixel_size, dst_bin_size_um=128, src_bin_size_um=16)
+        pooled_adata = pool_bins_visiumhd(adata, pixel_size, dst_bin_size_um=dst_bin_size_um, src_bin_size_um=SPOT_SIZE, chunk_len=chunk_len)
             
         meta['pixel_size_um_embedded'] = pixel_size_embedded
         meta['pixel_size_um_estimated'] = pixel_size
         meta['spots_under_tissue'] = len(pooled_adata.obs)
             
-        register_downscale_img(pooled_adata, img, pixel_size, spot_size=128)
+        register_downscale_img(pooled_adata, img, pixel_size, spot_size=dst_bin_size_um)
         
         
         return VisiumHDHESTData(pooled_adata, img, meta['pixel_size_um_estimated'], meta)
@@ -388,7 +415,7 @@ class VisiumReader(Reader):
             autoalign_save_dir = None
             if save_autoalign:
                 autoalign_save_dir = os.path.join(os.path.dirname(img_path), 'spatial')
-            align_json = autoalign_visium(wsi.numpy(), autoalign_save_dir)
+            align_json = autoalign_visium(wsi_to_numpy(wsi), autoalign_save_dir)
             spatial_aligned = self._alignment_file_to_tissue_positions('', adata, align_json)
         
         elif tissue_position_exists:
@@ -775,6 +802,9 @@ class XeniumReader(Reader):
             if file.endswith('imagealignment.csv'):
                 alignment_path = os.path.join(path, file)
         alignment_path = read_kwargs.pop('alignment_path', alignment_path)
+        
+        if alignment_path is None:
+            warnings.warn("Couldn't find an alignment file for the current Xenium sample. Does a file ending in imagealignment.csv exist in the given folder?")
                 
         dapi_path = None
         dapi_path = find_first_file_endswith(
@@ -823,16 +853,10 @@ class XeniumReader(Reader):
         return pixel_size_estimated
         
         
-    def __load_transcripts(self, transcripts_path, alignment_matrix, pixel_size_morph, use_dask):
+    def __load_transcripts(self, transcripts_path, alignment_matrix, pixel_size_morph, use_dask, nb_partitions=30):
 
         if use_dask:
-            import dask.dataframe as dd
-            import pyarrow.parquet as pq
-
-            parquet_file = pq.ParquetFile(transcripts_path)
-            total_row_groups = parquet_file.num_row_groups
-            row_groups_per_partition = max(1, total_row_groups // 30)
-            df_transcripts = dd.read_parquet(transcripts_path, split_row_groups=row_groups_per_partition)
+            df_transcripts = read_parquet_dask(transcripts_path, nb_partitions)
         else:
             df_transcripts = pd.read_parquet(transcripts_path)
         
@@ -901,14 +925,15 @@ class XeniumReader(Reader):
         dapi_path = None,
         load_img=True,
         use_dask=False,
-        spot_size_um=100.
+        spot_size_um=100.,
+        nb_partitions=30,
     ) -> XeniumHESTData:
         """ Read a Xenium sample
 
         Args:
             img_path (str): path to the WSI
             experiment_path (str): path to a `experiment.xenium` file
-            alignment_file_path (str, optional): path to a DAPI->H&E alignment file, None if the H&E is already aligned with the DAPI. Defaults to None.
+            alignment_file_path (str, optional): path to a DAPI->H&E matrix/keypoints alignment file, None if the H&E is already aligned with the DAPI. Defaults to None.
             feature_matrix_path (str, optional): path to a `cell_feature_matrix.h5`. Defaults to None.
             transcripts_path (str, optional): path to a transcripts.parquet, None to not load the transcripts. Defaults to None.
             cells_path (str, optional): path to a `cells.parquet` file, None to not load the cells. Defaults to None.
@@ -918,7 +943,8 @@ class XeniumReader(Reader):
             load_img (bool, optional): whenever to load the WSI. Defaults to True.
             use_dask (bool, optional): whenever to load the transcript dataframe with DASK (recommended if the transcript dataframe does not fit into the RAM). Defaults to False.
             spot_size_um (float, optional): transcripts are pooled into squares of spot_size_um x spot_size_um mirometers and then stored in `HESTData.adata`
-
+            nb_partitions (int, optional): number of dask partition to use if use_dask is True. Defaults to 30
+            
         Returns:
             XeniumHESTData: Xenium sample
         """
@@ -927,7 +953,7 @@ class XeniumReader(Reader):
             print("Loading the WSI... (can be slow for large images)")
             img, pixel_size_embedded = load_wsi(img_path)
         else:
-            img, pixel_size_embedded = wsi_factory(np.zeros((1, 1, 3))), None
+            img, pixel_size_embedded = wsi_factory(np.zeros((1, 1, 3)), mpp=1.0), None
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded
@@ -943,19 +969,32 @@ class XeniumReader(Reader):
         alignment_matrix = read_xenium_alignment(alignment_file_path) if alignment_file_path else None
         dict['pixel_size_um_estimated'] = self.__xenium_estimate_pixel_size(pixel_size_morph, alignment_matrix)
         if cell_bound_path is not None:
-            shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph}))
+            shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', 
+                                     reader=XeniumParquetCellReader, 
+                                     reader_kwargs={'pixel_size_morph': pixel_size_morph}))
             if alignment_matrix is not None:
-                shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'he', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph, 'alignment_matrix': alignment_matrix}))
+                shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'he', 
+                                         reader=XeniumParquetCellReader, 
+                                         reader_kwargs={
+                                             'pixel_size_morph': pixel_size_morph, 
+                                             'alignment_matrix': alignment_matrix}))
 
         if nucleus_bound_path is not None:
-            shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph}))
+            shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'dapi', 
+                                     reader=XeniumParquetCellReader, 
+                                     reader_kwargs={'pixel_size_morph': pixel_size_morph}))
             if alignment_matrix is not None:
-                shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'he', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph, 'alignment_matrix': alignment_matrix}))
+                shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'he', 
+                                         reader=XeniumParquetCellReader, 
+                                         reader_kwargs={
+                                             'pixel_size_morph': pixel_size_morph, 
+                                             'alignment_matrix': alignment_matrix}))
 
         
         if transcripts_path is not None:
             print('Loading transcripts...')
-            transcript_df = self.__load_transcripts(transcripts_path, alignment_matrix, pixel_size_morph, use_dask)
+            transcript_df = self.__load_transcripts(transcripts_path, alignment_matrix, pixel_size_morph, 
+                                                    use_dask, nb_partitions)
                     
             print("Pooling xenium transcripts in pseudo-visium spots...")
             adata = pool_transcripts_xenium(
@@ -1012,15 +1051,43 @@ def reader_factory(path: str) -> Reader:
     else:
         raise NotImplementedError('')
         
-def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False, read_kwargs={}, save_kwargs={}, segment_kwargs={}):
-    """For internal use, determine the appropriate reader based on the raw data path, and
-    automatically process the data at that location, then the processed files are dumped
-    to processed/
+
+def read_and_save(
+    path: str, 
+    save_plots=True, 
+    pyramidal=True, 
+    bigtiff=False, 
+    plot_pxl_size=True, 
+    save_img=True, 
+    segment_tissue=True, 
+    save_adata=True, 
+    qc=True,
+    dump_patches=True,
+    read_kwargs={}, 
+    save_kwargs={}, 
+    segment_kwargs={},
+    patching_kwargs={},
+) -> HESTData:
+    """ Determine the appropriate reader based on the raw data path, and
+        automatically process the data at that location, then the processed files are dumped
+        to processed/
 
     Args:
-        path (str): path of the raw data
-        save_plots (bool, optional): whenever to save the spatial plots. Defaults to True.
-        pyramidal (bool, optional): whenever to save as pyramidal. Defaults to True.
+        path (str): path to input folder (will be passed to reader auto_read)
+        save_plots (bool, optional): whenever to save spatial plots. Defaults to True.
+        pyramidal (bool, optional): whenever to save the wsi as pyramidal. Defaults to True.
+        bigtiff (bool, optional): whenever to save the wsi as bigtiff (should be set to True if >4.1GB). Defaults to False.
+        plot_pxl_size (bool, optional): whenever to save a plot showing the embedded vs computed pixel size. Defaults to True.
+        save_img (bool, optional): whenever to re-save the WSI in a format compatible with both openslide and qupath. Defaults to True.
+        segment_tissue (bool, optional): whenever to segment the tissue. Defaults to True.
+        save_adata (bool, optional): whenever to save an adata object with pooled expression. Defaults to True.
+        qc (bool, optional): whenever to save qc. Defaults to True.
+        dump_patches (bool, optional): whenever to dump patches. Defaults to True.
+        read_kwargs (dict, optional): kwargs passed to the reader. Defaults to {}.
+        save_kwargs (dict, optional): kwargs passed to HESTData save. Defaults to {}.
+        segment_kwargs (dict, optional): kwargs passed to segment_tissue. Defaults to {}.
+        patching_kwargs (dict, optional): kwargs passed to dump_patches. Defaults to {}.
+
     """
     print(f'Reading from {path}...')
     reader = reader_factory(path)
@@ -1032,11 +1099,32 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
         st_object.segment_tissue(**segment_kwargs)
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
-    st_object.save(save_path, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=plot_pxl_size, save_img=save_img, **save_kwargs)
+    st_object.save(
+        save_path, 
+        pyramidal=pyramidal, 
+        bigtiff=bigtiff, 
+        plot_pxl_size=plot_pxl_size, 
+        save_img=save_img, 
+        save_adata=save_adata,
+        qc=qc,
+        **save_kwargs
+    )
     if save_plots:
         st_object.save_spatial_plot(save_path)
+    if dump_patches:
+        st_object.dump_patches(save_path, qc=qc, **patching_kwargs)
+
     return st_object
         
+def get_indices_chunk(partition, key_x, key_y, 
+                      x_min, y_min, spot_size_um, pixel_size_he, n, spot_grid_columns):
+    a = np.floor((partition[key_x] - x_min) / (spot_size_um / pixel_size_he)).astype(int)
+    b = np.floor((partition[key_y] - y_min) / (spot_size_um / pixel_size_he)).astype(int)
+
+    c = b * n + a
+    cols = spot_grid_columns.get_indexer(partition['feature_name'])
+    return pd.DataFrame({'c': c, 'cols': cols}, index=partition.index)
+
 def pool_transcripts_xenium(
     df: Union[pd.DataFrame, dd.DataFrame], 
     pixel_size_he: float,
@@ -1047,10 +1135,11 @@ def pool_transcripts_xenium(
     """ Pool a xenium transcript dataframe by square spots of `spot_size_um` micrometers.
 
     Args:
-        df (Union[pd.DataFrame, dd.DataFrame]): xenium transcipts dataframe containing columns:
+        df (Union[pd.DataFrame, dd.DataFrame]): xenium transcipts (dask) dataframe containing columns:
+
             - 'he_x' and 'he_y' indicating the pixel coordinates of each transcripts in the morphology image
             - 'feature_name' indicating the transcript name
-        pixel_size_he (float): pixel_size in um on the he image
+        pixel_size_he (float): pixel size in um/px of 'he_x' and 'he_y'
         spot_size_um: pooling rectangle width in um
         key_x: column name of pixel x coordinate of each transcript in `df`
         key_y: column name of pixel y coordinate of each transcript in `df`
@@ -1061,6 +1150,7 @@ def pool_transcripts_xenium(
     """
     import scanpy as sc
     import dask.dataframe as dd
+    import dask
 
     y_max = df[key_y].max()
     y_min = df[key_y].min()
@@ -1070,32 +1160,42 @@ def pool_transcripts_xenium(
     m = ((y_max - y_min) / (spot_size_um / pixel_size_he))
     n = ((x_max - x_min) / (spot_size_um / pixel_size_he))
 
+    unique_features = df['feature_name'].unique()
+    
     if isinstance(df, dd.DataFrame):
-        m = m.compute()
-        n = n.compute()
+        m, n, unique_features, x_min, y_min = dask.compute(
+            m, n, unique_features, x_min, y_min)
 
     m = math.ceil(m)
     n = math.ceil(n)
+    spot_grid = pd.DataFrame(0, index=range(m * n), columns=unique_features)
+    spot_grid_np = spot_grid.values.astype(np.uint32)
     
-    features = df['feature_name'].unique()
     if isinstance(df, dd.DataFrame):
-        features = features.compute()
-    
-    spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
-    
+        import dask.array as da
+            
+        cols_c = df.map_partitions(get_indices_chunk, key_x, key_y, 
+                      x_min, y_min, spot_size_um, pixel_size_he, n, spot_grid.columns,
+                      meta={'c': 'int64', 'cols': 'int64'})
+        
+        num_rows = m * n
+        num_cols = len(unique_features)
+        c_da = cols_c['c'].to_dask_array(lengths=True)
+        cols_da = cols_c['cols'].to_dask_array(lengths=True)
+        h, xedges, yedges = da.histogram2d(
+            c_da, 
+            cols_da, 
+            bins=[np.arange(num_rows + 1), np.arange(num_cols + 1)]
+        )
+        spot_grid_np = h.astype(np.uint32).compute()
+        
+    else:
+        cols_c = get_indices_chunk(key_x, key_y, 
+                      x_min, y_min, spot_size_um, pixel_size_he, n, spot_grid.columns)
 
-    # a is the row and b is the column in the pseudo visium grid
-    a = np.floor((df[key_x] - x_min) / (spot_size_um / pixel_size_he)).astype(int)
-    b = np.floor((df[key_y] - y_min) / (spot_size_um / pixel_size_he)).astype(int)
-    
-    c = b * n + a
-    features = df['feature_name']
-    
-    cols = spot_grid.columns.get_indexer(features)
-    
-    ## use dask for this parts
-    spot_grid_np = spot_grid.values.astype(np.uint16)
-    np.add.at(spot_grid_np, (c, cols), 1)
+        c = cols_c['c']
+        cols = cols_c['cols']
+        np.add.at(spot_grid_np, (c, cols), 1)
     
     
     if isinstance(spot_grid.columns.values[0], bytes):
@@ -1105,9 +1205,6 @@ def pool_transcripts_xenium(
     expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
     
     coord_df = expression_df.copy()
-    if isinstance(df, dd.DataFrame):
-        x_min = x_min.compute()
-        y_min = y_min.compute()
 
     coord_df['x'] = x_min + (coord_df.index % n) * (spot_size_um / pixel_size_he) + ((spot_size_um / 2) / pixel_size_he)
     coord_df['y'] = y_min + np.floor(coord_df.index / n) * (spot_size_um / pixel_size_he) + ((spot_size_um / 2) / pixel_size_he)
@@ -1130,7 +1227,8 @@ def pool_transcripts_xenium(
 
 
 def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128, src_bin_size_um: Literal[2, 8, 16]=16, chunk_len=50000) -> sc.AnnData: # type: ignore
-    """ Pool a Visium HD (with a source resolution of `src_bin_size_um`) by square spots of `spot_size_um` micrometers.
+    """ Pools Visium HD bins from an initial resolution (src_bin_size_um) into larger square spots of spot_size_um. 
+    This performs a best-effort spatial downsampling (bin-to-bin aggregation).
 
     Args:
         adata (sc.AnnData): adata containing spot center coordiniates in `pxl_row_in_fullres` and `pxl_col_in_fullres`
@@ -1146,6 +1244,9 @@ def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128
 
     if src_bin_size_um >= dst_bin_size_um:
         raise ValueError("dst_bin_size_um needs to be larger than src_bin_size_um")
+    
+    if dst_bin_size_um % src_bin_size_um != 0:
+        raise ValueError("dst_bin_size_um must be a multiple of src_bin_size_um")
     
     y_max = adata.obs['pxl_row_in_fullres'].max()
     y_min = adata.obs['pxl_row_in_fullres'].min()
@@ -1204,6 +1305,54 @@ def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128
     
     return adata
 
+
+def pool_bins_visiumhd_per_cell(
+    nuc_seg: Union[str, gpd.GeoDataFrame], 
+    bc_matrix: Union[str, sc.AnnData], 
+    path_bins_pos: str, 
+    pixel_size: float, 
+    save_dir: str = None, 
+    exp_um = 5, 
+    exp_nuclei: bool = True
+) -> Tuple[sc.AnnData, gpd.GeoDataFrame]:
+    """ Pool Visium-hd bins per cell.
+
+    Args:
+        nuc_seg (Union[str, gpd.GeoDataFrame]): nuclei segmentation
+        bc_matrix (Union[str, sc.AnnData]): bc_matrix representing Visium-hd bins.
+        path_bins_pos (str): path to `tissue_positions.parquet`
+        pixel_size (float): pixel size of path_bins_pos in um/px
+        save_dir (str, optional): whenever to save to aligned_cells.h5ad. Defaults to None.
+        exp_um (int, optional): nuclei expansion in um if exp_nuclei is True. Defaults to 5.
+        exp_nuclei (bool, optional): whenever to expand nuclei to derive cells. Defaults to True.
+
+    Returns:
+        Tuple[sc.AnnData, gpd.GeoDataFrame]: binned adata and (expended) nuclei
+    """
+    
+    verify_paths([bc_matrix, path_bins_pos])
+    
+
+    nuclei_gdf = read_seg(nuc_seg)
+    
+    if exp_nuclei:
+        cell_gdf = expand_nuclei(nuclei_gdf, pixel_size, exp_um=exp_um)
+    else:
+        cell_gdf = nuclei_gdf
+    
+    logger.info('Read bin positions...')
+    points_gdf = read_spots_gdf(path_bins_pos)
+    
+    assignment = assign_spot_to_cell(cell_gdf, points_gdf)
+    
+    adata = read_adata(bc_matrix)
+    
+    cell_adata = sum_per_cell(adata, assignment)
+    
+    if save_dir is not None:
+        cell_adata.write_h5ad(os.path.join(save_dir, 'aligned_cells.h5ad'))
+    
+    return cell_adata, cell_gdf
     
 
 def _process_cellvit(row, **cellvit_kwargs):
@@ -1231,3 +1380,84 @@ def process_meta_df_cellvit(meta_df, cellvit_kwargs={'gpu_ids': [0, 1], 'batch_s
     for _, row in meta_df.iterrows():
         _process_cellvit(row, **cellvit_kwargs)
     
+
+def save_meta(row_dict):
+    path = get_path_from_meta_row(row_dict)
+    
+    with open(os.path.join(path, 'processed', f'metrics.json'), 'r') as f:
+        meta = json.load(f)
+    
+    combined_meta = {**meta, **row_dict}
+    cols = get_col_selection()
+    combined_meta = {k: v for k, v in combined_meta.items() if k in cols}
+    with open(os.path.join(path, 'processed', f'meta.json'), 'w') as f:
+        json.dump(combined_meta, f, indent=4)
+
+
+def process_raw_samples(
+    meta_df: pd.DataFrame,
+    save_plots=True, 
+    pyramidal=True, 
+    bigtiff=False, 
+    plot_pxl_size=True, 
+    save_img=True, 
+    segment_tissue=True, 
+    save_adata=True, 
+    qc=True,
+    dump_patches=True,
+    read_kwargs={
+        'use_dask': True,
+        'nb_partitions': 100,
+    }, 
+    save_kwargs={
+        'save_nuclei_seg': True,
+        'save_cell_seg': True
+    }, 
+    segment_kwargs={},
+    patching_kwargs={},
+) -> None:
+    """ Process raw samples and save them into HEST format
+
+        Args:
+            meta_df (str): metadata dataframe
+            save_plots (bool, optional): whenever to save spatial plots. Defaults to True.
+            pyramidal (bool, optional): whenever to save the wsi as pyramidal. Defaults to True.
+            bigtiff (bool, optional): whenever to save the wsi as bigtiff (should be set to True if >4.1GB). Defaults to False.
+            plot_pxl_size (bool, optional): whenever to save a plot showing the embedded vs computed pixel size. Defaults to True.
+            save_img (bool, optional): whenever to re-save the WSI in a format compatible with both openslide and qupath. Defaults to True.
+            segment_tissue (bool, optional): whenever to segment the tissue. Defaults to True.
+            save_adata (bool, optional): whenever to save an adata object with pooled expression. Defaults to True.
+            qc (bool, optional): whenever to save qc. Defaults to True.
+            dump_patches (bool, optional): whenever to dump patches. Defaults to True.
+            read_kwargs (dict, optional): kwargs passed to the reader. Defaults to {}.
+            save_kwargs (dict, optional): kwargs passed to HESTData save. Defaults to {}.
+            segment_kwargs (dict, optional): kwargs passed to segment_tissue. Defaults to {}.
+            patching_kwargs (dict, optional): kwargs passed to dump_patches. Defaults to {}.
+    """
+            
+    for _, row in tqdm(meta_df.iterrows()):
+        path = get_path_from_meta_row(row)
+
+        sample_folder_path = path
+        res_folder = os.path.join(path, 'processed')
+        os.makedirs(res_folder, exist_ok=True)
+
+        bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
+        read_and_save(
+            sample_folder_path,
+            save_plots=save_plots,
+            pyramidal=pyramidal,
+            bigtiff=bigtiff,
+            plot_pxl_size=plot_pxl_size,
+            save_img=save_img,
+            segment_tissue=segment_tissue,
+            save_adata=save_adata,
+            qc=qc,
+            dump_patches=dump_patches,
+            read_kwargs=read_kwargs,
+            save_kwargs=save_kwargs,
+            segment_kwargs=segment_kwargs,
+            patching_kwargs=patching_kwargs
+        )
+
+        save_meta(dict(row))

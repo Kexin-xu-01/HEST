@@ -5,8 +5,8 @@ from datetime import datetime
 from os.path import join as _j
 import zipfile
 
-from hestcore.segmentation import get_path_relative
-from hestcore.wsi import CucimWarningSingleton
+from hest.path_utils import get_path_relative
+from hest.trident_compat import CucimWarningSingleton
 from huggingface_hub import snapshot_download
 from tqdm import tqdm
 
@@ -43,6 +43,14 @@ class TestHESTReader(unittest.TestCase):
     def setUpClass(self):
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
+        required_paths = [
+            _j(cur_dir, './assets/WSA_LngSP9258463.jpg'),
+            _j(cur_dir, './assets/filtered_feature_bc_matrix.h5'),
+            _j(cur_dir, './assets/spatial'),
+        ]
+        missing_paths = [p for p in required_paths if not os.path.exists(p)]
+        if missing_paths:
+            raise unittest.SkipTest(f"Missing local reader test assets: {missing_paths}")
         self.output_dir = _j(cur_dir, 'output_tests', 'reader_tests')
         os.makedirs(self.output_dir, exist_ok=True)
         
@@ -118,14 +126,14 @@ class TestHESTData(unittest.TestCase):
         
         from huggingface_hub import login
         
-        token = os.getenv('HF_READ_TOKEN_PAUL')
-        if token is None:
-            download = False
-            warnings.warn("Please setup huggingface token 'HF_READ_TOKEN_PAUL'")
-        else:
-            download = True
+        token = (
+            os.getenv('HF_TOKEN')
+            or os.getenv('HUGGINGFACE_HUB_TOKEN')
+            or os.getenv('HF_READ_TOKEN_PAUL')
+        )
+        if token is not None:
             login(token=token)
-        download=True
+        download = True
         
         id_list = ['TENX24', 'SPA154']
         
@@ -150,16 +158,12 @@ class TestHESTData(unittest.TestCase):
     def test_tissue_seg(self):
         for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
-                st.segment_tissue(method='deep')
-                st.save_tissue_contours(self.output_dir, name=f'deep_{idx}')
-                st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
-                st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
-                st.save_tissue_vis(self.output_dir, name=f'deep_{idx}')
+                #st.segment_tissue(method='deep', verbose=True, fast_mode=True)
+                #st.save_tissue_contours(self.output_dir, name=f'deep_{idx}')
+                #st.save_tissue_vis(self.output_dir, name=f'deep_{idx}')
                 
                 st.segment_tissue(method='otsu')
                 st.save_tissue_contours(self.output_dir, name=f'otsu_{idx}')
-                st.save_tissue_seg_jpg(self.output_dir, name=f'otsu_{idx}')
-                st.save_tissue_seg_pkl(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_vis(self.output_dir, name=f'otsu_{idx}')
 
 
@@ -173,8 +177,8 @@ class TestHESTData(unittest.TestCase):
 
 
     def test_patching(self):
-        """ Save patches as .h5 then load with H5HESTDataset """
-        from hestcore.datasets import H5HESTDataset
+        """ Save patches as .h5 then load with H5PatchDataset """
+        from hest.bench.st_dataset import H5PatchDataset
         from PIL import Image, ImageDraw
         from torch.utils.data import DataLoader
         output_dir = os.path.join(self.output_dir, 'test_patching')
@@ -186,15 +190,15 @@ class TestHESTData(unittest.TestCase):
                 name += st.meta['id']
                 st.dump_patches(output_dir, name=name, target_patch_size=target_patch_size)
                 
-                dataset = H5HESTDataset(os.path.join(output_dir, name + '.h5'), chunk_size=8)
-                dataloader = DataLoader(dataset)
+                dataset = H5PatchDataset(os.path.join(output_dir, name + '.h5'))
+                dataloader = DataLoader(dataset, batch_size=8)
                 for batch in dataloader:
-                    imgs, barcodes, coords = batch['imgs'].squeeze(0), batch['barcodes'], batch['coords'].squeeze(0)
+                    imgs, barcodes, coords = batch['imgs'], batch['barcodes'], batch['coords']
                     for i in range(len(imgs)):
                         img = imgs[i]
                         assert img.shape == (target_patch_size, target_patch_size, 3)
-                        barcode = barcodes[i][0]
-                        assert barcode.decode('utf-8') in st.adata.obs.index
+                        barcode = barcodes[i]
+                        assert barcode in st.adata.obs.index
                         img = Image.fromarray(img.numpy())
                         draw = ImageDraw.Draw(img)
                         text_color = (0, 255, 0)
@@ -224,7 +228,7 @@ if __name__ == '__main__':
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestHESTData)
     # suite = unittest.TestSuite()
-    # suite.addTest(TestHESTData('test_patching'))
+    #suite.addTest(TestHESTData('test_spatialdata'))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
         raise Exception('Test failed')

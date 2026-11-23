@@ -1190,7 +1190,7 @@ def pool_transcripts_xenium(
         spot_grid_np = h.astype(np.uint32).compute()
         
     else:
-        cols_c = get_indices_chunk(key_x, key_y, 
+        cols_c = get_indices_chunk(df, key_x, key_y, 
                       x_min, y_min, spot_size_um, pixel_size_he, n, spot_grid.columns)
 
         c = cols_c['c']
